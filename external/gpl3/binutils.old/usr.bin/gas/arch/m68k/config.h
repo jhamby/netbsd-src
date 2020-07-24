@@ -298,7 +298,7 @@
 #define TARGET_ALIAS "m68k--netbsdelf"
 
 /* Define as 1 if big endian. */
-#define TARGET_BYTES_BIG_ENDIAN 1
+/* #undef TARGET_BYTES_BIG_ENDIAN */
 
 /* Canonical target. */
 #define TARGET_CANONICAL "m68k--netbsdelf"
