@@ -40,7 +40,8 @@ all: ${FILES}
 
 INCPATH = -I${DIR_TOP} -I${DIR_TOP}/lib/libsa -I${DIR_BOOT} -I${.CURDIR} -I${.CURDIR}/../../.. -I${.CURDIR}/../elf2bb -I${.OBJDIR}
 
-AFLAGS += -m68030 -l
+# don't reuse AFLAGS; it may contain CPUFLAGS that gas doesn't support
+TXAFLAGS = -m68030 -l
 CAFLAGS += -Wa,-l -Wa,-mcpu=68030 ${INCPATH}
 
 COPTIM= -Os -fomit-frame-pointer -fcse-follow-jumps -fcse-skip-blocks
@@ -49,7 +50,7 @@ CFLAGS= -ffreestanding ${COPTIM} ${INCPATH} ${DEFS} -Wall #-Wstrict-prototypes
 
 .c.o:
 	${CC} ${CFLAGS} -S $< -o $*.s
-	${TXLT} < $*.s | ${AS} ${AFLAGS} -o $*.o
+	${TXLT} < $*.s | ${AS} ${TXAFLAGS} -o $*.o
 	rm $*.s
 
 .s.o: ; ${CC} ${CAFLAGS} ${COPTS} -x assembler-with-cpp -o $@ -c $<

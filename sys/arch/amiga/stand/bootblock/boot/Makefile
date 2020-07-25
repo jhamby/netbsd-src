@@ -84,7 +84,8 @@ INCPATH += -I${.CURDIR}
 INCPATH += -I${.CURDIR}/../../.. -I${.OBJDIR}
 INCPATH += -I${.CURDIR}/../elf2bb
 
-AFLAGS += -march=68030 -mcpu=68030 -l
+# don't reuse AFLAGS; it may contain CPUFLAGS that gas doesn't support
+TXAFLAGS = -march=68030 -mcpu=68030 -l
 CAFLAGS += -Wa,-l -Wa,-march=68030 -Wa,-mcpu=68030 ${INCPATH}
 
 COPTIM= -Os -fomit-frame-pointer -fcse-follow-jumps -fcse-skip-blocks
@@ -99,7 +100,7 @@ COPTS.cread.c = -O1
 .c.o:
 	${_MKTARGET_COMPILE}
 	${CC} ${CFLAGS} ${COPTS.${.IMPSRC:T}} -S $< -o $*.s
-	${TXLT} < $*.s | ${AS} ${AFLAGS} -o $@
+	${TXLT} < $*.s | ${AS} ${TXAFLAGS} -o $@
 	rm $*.s
 
 .s.o:
