@@ -109,7 +109,7 @@ AFLAGS+=	-D_LOCORE -Wa,--fatal-warnings
 #    find . -name \*.su | xargs awk '{ printf "%6d %s\n", $2, $1 }' | sort -n
 .if ${MACHINE} != "vax"
 # GCC/vax 8.4 does not support -fstack-usage.
-CFLAGS+=	${${ACTIVE_CC} == "gcc":? -fstack-usage -Wstack-usage=3584 :}
+CFLAGS+=	${${ACTIVE_CC} == "gcc":? -fstack-usage :}
 .endif
 CWARNFLAGS+=	-Walloca
 
