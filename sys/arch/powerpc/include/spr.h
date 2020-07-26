@@ -37,18 +37,16 @@
 #include <powerpc/oea/cpufeat.h>
 
 #if defined(PPC_OEA64_BRIDGE) || defined (_ARCH_PPC64)
-static __inline uint64_t
-mfspr64(int reg)
-{
-	uint64_t ret;
-	register_t hi, l;
-
-	__asm volatile( "mfspr %0,%2;"
-			"srdi %1,%0,32;"
-			 : "=r"(l), "=r"(hi) : "K"(reg));
-	ret = ((uint64_t)hi << 32) | l;
-	return ret;
-}
+/* This as an inline breaks as 'reg' ends up not being an immediate */
+#define mfspr64(reg)						\
+( {								\
+	register_t hi, l;					\
+								\
+	__asm volatile( "mfspr %0,%2;"				\
+			"srdi %1,%0,32;"			\
+			 : "=r"(l), "=r"(hi) : "K"(reg));	\
+	((uint64_t)hi << 32) | l;				\
+} )
 
 /* This as an inline breaks as 'reg' ends up not being an immediate */
 #define mtspr64(reg, v)						\
@@ -72,30 +70,28 @@ mfspr64(int reg)
 } )
 #endif /* PPC_OEA64_BRIDGE || _ARCH_PPC64 */
 
-static __inline uint64_t
-mfspr32(int reg)
-{
-	register_t val;
+/* This as an inline breaks as 'reg' ends up not being an immediate */
+#define mfspr32(reg)						\
+( {								\
+	register_t val;						\
+								\
+	__asm volatile("mfspr %0,%1" : "=r"(val) : "K"(reg));	\
+	val;							\
+} )
 
-	__asm volatile("mfspr %0,%1" : "=r"(val) : "K"(reg));
-	return val;
-}
-
-static __inline void
-mtspr32(int reg, uint32_t val)
-{
-
-	__asm volatile("mtspr %0,%1" : : "K"(reg), "r"(val));
-}
+/* This as an inline breaks as 'reg' ends up not being an immediate */
+#define mtspr32(reg, val)					\
+( {								\
+	__asm volatile("mtspr %0,%1" : : "K"(reg), "r"(val));	\
+} )
 
 #if (defined(PPC_OEA) + defined(PPC_OEA64) + defined(PPC_OEA64_BRIDGE)) > 1
-static __inline uint64_t
-mfspr(int reg)
-{
-	if ((oeacpufeat & (OEACPU_64_BRIDGE|OEACPU_64)) != 0)
-		return mfspr64(reg);
-	return mfspr32(reg);
-}
+/* This as an inline breaks as 'reg' ends up not being an immediate */
+#define mfspr(reg)						\
+( {								\
+	((oeacpufeat & (OEACPU_64_BRIDGE|OEACPU_64)) != 0)	\
+		? mfspr64(reg) : mfspr32(reg);			\
+} )
 
 /* This as an inline breaks as 'reg' ends up not being an immediate */
 #define mtspr(reg, val)						\
