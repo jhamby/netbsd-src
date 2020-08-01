@@ -1,4 +1,4 @@
-/*	$NetBSD: parse.c,v 1.243 2020/07/31 20:22:10 sjg Exp $	*/
+/*	$NetBSD: parse.c,v 1.246 2020/08/01 14:47:49 rillig Exp $	*/
 
 /*
  * Copyright (c) 1988, 1989, 1990, 1993
@@ -69,14 +69,14 @@
  */
 
 #ifndef MAKE_NATIVE
-static char rcsid[] = "$NetBSD: parse.c,v 1.243 2020/07/31 20:22:10 sjg Exp $";
+static char rcsid[] = "$NetBSD: parse.c,v 1.246 2020/08/01 14:47:49 rillig Exp $";
 #else
 #include <sys/cdefs.h>
 #ifndef lint
 #if 0
 static char sccsid[] = "@(#)parse.c	8.3 (Berkeley) 3/19/94";
 #else
-__RCSID("$NetBSD: parse.c,v 1.243 2020/07/31 20:22:10 sjg Exp $");
+__RCSID("$NetBSD: parse.c,v 1.246 2020/08/01 14:47:49 rillig Exp $");
 #endif
 #endif /* not lint */
 #endif
@@ -699,8 +699,8 @@ ParseVErrorInternal(FILE *f, const char *cfname, size_t clineno, int type,
 					fname = cfname;
 			}
 			(void)fprintf(f, "%s/%s", dir, fname);
-			free(cp2);
-			free(cp);
+			bmake_free(cp2);
+			bmake_free(cp);
 		} else
 			(void)fprintf(f, "%s", cfname);
 
@@ -1597,9 +1597,9 @@ ParseDoDependency(char *line)
 		Dir_SetPATH();
 		break;
 #ifdef POSIX
-            case Posix:
-                Var_Set("%POSIX", "1003.2", VAR_GLOBAL);
-                break;
+	    case Posix:
+		Var_Set("%POSIX", "1003.2", VAR_GLOBAL);
+		break;
 #endif
 	    default:
 		break;
@@ -2236,7 +2236,7 @@ Parse_include_file(char *file, Boolean isSystem, Boolean depinc, int silent)
 
 	if (fullname == NULL) {
 	    /*
-    	     * Makefile wasn't found in same directory as included makefile.
+	     * Makefile wasn't found in same directory as included makefile.
 	     * Search for it first on the -I search path,
 	     * then on the .PATH search path, if not found in a -I directory.
 	     * If we have a suffix specific path we should use that.
@@ -2364,20 +2364,20 @@ ParseDoInclude(char *line)
 static void
 ParseSetIncludedFile(void)
 {
-    char *pf, *fp = NULL;
-    char *pd, *dp = NULL;
+    char *pf_freeIt;
+    char *pd_freeIt;
 
-    pf = Var_Value(".PARSEFILE", VAR_GLOBAL, &fp);
+    const char *pf = Var_Value(".PARSEFILE", VAR_GLOBAL, &pf_freeIt);
     Var_Set(".INCLUDEDFROMFILE", pf, VAR_GLOBAL);
-    pd = Var_Value(".PARSEDIR", VAR_GLOBAL, &dp);
+    const char *pd = Var_Value(".PARSEDIR", VAR_GLOBAL, &pd_freeIt);
     Var_Set(".INCLUDEDFROMDIR", pd, VAR_GLOBAL);
 
     if (DEBUG(PARSE))
 	fprintf(debug_file, "%s: ${.INCLUDEDFROMDIR} = `%s' "
 	    "${.INCLUDEDFROMFILE} = `%s'\n", __func__, pd, pf);
 
-    free(fp);
-    free(dp);
+    bmake_free(pf_freeIt);
+    bmake_free(pd_freeIt);
 }
 /*-
  *---------------------------------------------------------------------
@@ -2428,14 +2428,12 @@ ParseSetParseFile(const char *filename)
 static void
 ParseTrackInput(const char *name)
 {
-    char *old;
-    char *ep;
     char *fp = NULL;
-    size_t name_len = strlen(name);
 
-    old = Var_Value(MAKE_MAKEFILES, VAR_GLOBAL, &fp);
+    const char *old = Var_Value(MAKE_MAKEFILES, VAR_GLOBAL, &fp);
     if (old) {
-	ep = old + strlen(old) - name_len;
+	size_t name_len = strlen(name);
+	const char *ep = old + strlen(old) - name_len;
 	/* does it contain name? */
 	for (; old != NULL; old = strchr(old, ' ')) {
 	    if (*old == ' ')
@@ -2449,9 +2447,7 @@ ParseTrackInput(const char *name)
     }
     Var_Append (MAKE_MAKEFILES, name, VAR_GLOBAL);
  cleanup:
-    if (fp) {
-	free(fp);
-    }
+    bmake_free(fp);
 }
 
 
@@ -2514,7 +2510,7 @@ Parse_SetInput(const char *name, int line, int fd,
     /* Get first block of input data */
     buf = curFile->nextbuf(curFile->nextbuf_arg, &len);
     if (buf == NULL) {
-        /* Was all a waste of time ... */
+	/* Was all a waste of time ... */
 	if (curFile->fname)
 	    free(curFile->fname);
 	free(curFile);
@@ -3342,7 +3338,7 @@ Parse_MainName(void)
 
     if (mainNode == NULL) {
 	Punt("no target to make.");
-    	/*NOTREACHED*/
+	/*NOTREACHED*/
     } else if (mainNode->type & OP_DOUBLEDEP) {
 	(void)Lst_AtEnd(mainList, mainNode);
 	Lst_Concat(mainList, mainNode->cohorts, LST_CONCNEW);

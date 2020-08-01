@@ -1,4 +1,4 @@
-/*	$NetBSD: var.c,v 1.368 2020/07/31 14:59:53 rillig Exp $	*/
+/*	$NetBSD: var.c,v 1.385 2020/08/01 18:14:08 rillig Exp $	*/
 
 /*
  * Copyright (c) 1988, 1989, 1990, 1993
@@ -69,14 +69,14 @@
  */
 
 #ifndef MAKE_NATIVE
-static char rcsid[] = "$NetBSD: var.c,v 1.368 2020/07/31 14:59:53 rillig Exp $";
+static char rcsid[] = "$NetBSD: var.c,v 1.385 2020/08/01 18:14:08 rillig Exp $";
 #else
 #include <sys/cdefs.h>
 #ifndef lint
 #if 0
 static char sccsid[] = "@(#)var.c	8.3 (Berkeley) 3/19/94";
 #else
-__RCSID("$NetBSD: var.c,v 1.368 2020/07/31 14:59:53 rillig Exp $");
+__RCSID("$NetBSD: var.c,v 1.385 2020/08/01 18:14:08 rillig Exp $");
 #endif
 #endif /* not lint */
 #endif
@@ -524,12 +524,10 @@ Var_Export1(const char *name, VarExportFlags flags)
     v = VarFind(name, VAR_GLOBAL, 0);
     if (v == NULL)
 	return 0;
-    if (!parent &&
-	(v->flags & (VAR_EXPORTED | VAR_REEXPORT)) == VAR_EXPORTED) {
-	return 0;			/* nothing to do */
-    }
+    if (!parent && (v->flags & VAR_EXPORTED) && !(v->flags & VAR_REEXPORT))
+	return 0;		/* nothing to do */
     val = Buf_GetAll(&v->val, NULL);
-    if ((flags & VAR_EXPORT_LITERAL) == 0 && strchr(val, '$')) {
+    if (!(flags & VAR_EXPORT_LITERAL) && strchr(val, '$')) {
 	if (parent) {
 	    /*
 	     * Flag this as something we need to re-export.
@@ -582,7 +580,6 @@ Var_ExportVars(void)
 {
     char tmp[BUFSIZ];
     char *val;
-    int n;
 
     /*
      * Several make's support this sort of mechanism for tracking
@@ -601,26 +598,21 @@ Var_ExportVars(void)
 	Hash_ForEach(&VAR_GLOBAL->context, Var_ExportVars_callback, NULL);
 	return;
     }
-    /*
-     * We have a number of exported vars,
-     */
-    n = snprintf(tmp, sizeof(tmp), "${" MAKE_EXPORTED ":O:u}");
-    if (n < (int)sizeof(tmp)) {
+
+    val = Var_Subst("${" MAKE_EXPORTED ":O:u}", VAR_GLOBAL, VARE_WANTRES);
+    if (*val) {
 	char **av;
 	char *as;
 	int ac;
 	int i;
 
-	val = Var_Subst(tmp, VAR_GLOBAL, VARE_WANTRES);
-	if (*val) {
-	    av = brk_string(val, &ac, FALSE, &as);
-	    for (i = 0; i < ac; i++)
-		Var_Export1(av[i], 0);
-	    free(as);
-	    free(av);
-	}
-	free(val);
+	av = brk_string(val, &ac, FALSE, &as);
+	for (i = 0; i < ac; i++)
+	    Var_Export1(av[i], 0);
+	free(as);
+	free(av);
     }
+    free(val);
 }
 
 /*
@@ -788,7 +780,7 @@ Var_Set_with_flags(const char *name, const char *val, GNode *ctxt,
 		   VarSet_Flags flags)
 {
     Var *v;
-    char *expanded_name = NULL;
+    char *name_freeIt = NULL;
 
     /*
      * We only look for a variable in the given context since anything set
@@ -796,22 +788,22 @@ Var_Set_with_flags(const char *name, const char *val, GNode *ctxt,
      * point in searching them all just to save a bit of memory...
      */
     if (strchr(name, '$') != NULL) {
-	expanded_name = Var_Subst(name, ctxt, VARE_WANTRES);
-	if (expanded_name[0] == '\0') {
+	const char *unexpanded_name = name;
+	name = name_freeIt = Var_Subst(name, ctxt, VARE_WANTRES);
+	if (name[0] == '\0') {
 	    if (DEBUG(VAR)) {
 		fprintf(debug_file, "Var_Set(\"%s\", \"%s\", ...) "
 			"name expands to empty string - ignored\n",
-			name, val);
+			unexpanded_name, val);
 	    }
-	    free(expanded_name);
+	    free(name_freeIt);
 	    return;
 	}
-	name = expanded_name;
     }
     if (ctxt == VAR_GLOBAL) {
 	v = VarFind(name, VAR_CMD, 0);
 	if (v != NULL) {
-	    if ((v->flags & VAR_FROM_CMD)) {
+	    if (v->flags & VAR_FROM_CMD) {
 		if (DEBUG(VAR)) {
 		    fprintf(debug_file, "%s:%s = %s ignored!\n", ctxt->name, name, val);
 		}
@@ -822,7 +814,7 @@ Var_Set_with_flags(const char *name, const char *val, GNode *ctxt,
     }
     v = VarFind(name, ctxt, 0);
     if (v == NULL) {
-	if (ctxt == VAR_CMD && (flags & VAR_NO_EXPORT) == 0) {
+	if (ctxt == VAR_CMD && !(flags & VAR_NO_EXPORT)) {
 	    /*
 	     * This var would normally prevent the same name being added
 	     * to VAR_GLOBAL, so delete it from there if needed.
@@ -839,7 +831,7 @@ Var_Set_with_flags(const char *name, const char *val, GNode *ctxt,
 	if (DEBUG(VAR)) {
 	    fprintf(debug_file, "%s:%s = %s\n", ctxt->name, name, val);
 	}
-	if ((v->flags & VAR_EXPORTED)) {
+	if (v->flags & VAR_EXPORTED) {
 	    Var_Export1(name, VAR_EXPORT_PARENT);
 	}
     }
@@ -847,7 +839,7 @@ Var_Set_with_flags(const char *name, const char *val, GNode *ctxt,
      * Any variables given on the command line are automatically exported
      * to the environment (as per POSIX standard)
      */
-    if (ctxt == VAR_CMD && (flags & VAR_NO_EXPORT) == 0) {
+    if (ctxt == VAR_CMD && !(flags & VAR_NO_EXPORT)) {
 	if (v == NULL) {
 	    /* we just added it */
 	    v = VarFind(name, ctxt, 0);
@@ -869,7 +861,7 @@ Var_Set_with_flags(const char *name, const char *val, GNode *ctxt,
 	save_dollars = s2Boolean(val, save_dollars);
 
 out:
-    free(expanded_name);
+    free(name_freeIt);
     if (v != NULL)
 	VarFreeEnv(v, TRUE);
 }
@@ -998,13 +990,12 @@ Var_Append(const char *name, const char *val, GNode *ctxt)
 Boolean
 Var_Exists(const char *name, GNode *ctxt)
 {
-    Var		  *v;
-    char          *cp;
+    char *name_freeIt = NULL;
+    if (strchr(name, '$') != NULL)
+	name = name_freeIt = Var_Subst(name, ctxt, VARE_WANTRES);
 
-    if ((cp = strchr(name, '$')) != NULL)
-	cp = Var_Subst(name, ctxt, VARE_WANTRES);
-    v = VarFind(cp ? cp : name, ctxt, FIND_CMD | FIND_GLOBAL | FIND_ENV);
-    free(cp);
+    Var *v = VarFind(name, ctxt, FIND_CMD | FIND_GLOBAL | FIND_ENV);
+    free(name_freeIt);
     if (v == NULL)
 	return FALSE;
 
@@ -1016,7 +1007,7 @@ Var_Exists(const char *name, GNode *ctxt)
  *-----------------------------------------------------------------------
  * Var_Value --
  *	Return the unexpanded value of the given variable in the given
- *	context.
+ *	context, or the usual contexts.
  *
  * Input:
  *	name		name to find
@@ -1028,7 +1019,7 @@ Var_Exists(const char *name, GNode *ctxt)
  *	as soon as the returned value is no longer needed.
  *-----------------------------------------------------------------------
  */
-char *
+const char *
 Var_Value(const char *name, GNode *ctxt, char **freeIt)
 {
     Var *v = VarFind(name, ctxt, FIND_ENV | FIND_GLOBAL | FIND_CMD);
@@ -1174,94 +1165,59 @@ ModifyWord_NoMatch(const char *word, SepBuf *buf, void *data)
  * Input:
  *	word		Word to examine
  *	pattern		Pattern to examine against
- *	len		Number of characters to substitute
  *
  * Results:
- *	Returns the beginning position of a match or null. The number
- *	of characters matched is returned in len.
+ *	Returns the start of the match, or NULL.
+ *	*match_len returns the length of the match, if any.
+ *	*hasPercent returns whether the pattern contains a percent.
  *-----------------------------------------------------------------------
  */
 static const char *
-Str_SYSVMatch(const char *word, const char *pattern, size_t *len,
+Str_SYSVMatch(const char *word, const char *pattern, size_t *match_len,
     Boolean *hasPercent)
 {
     const char *p = pattern;
     const char *w = word;
-    const char *m;
 
     *hasPercent = FALSE;
-    if (*p == '\0') {
-	/* Null pattern is the whole string */
-	*len = strlen(w);
+    if (*p == '\0') {		/* ${VAR:=suffix} */
+	*match_len = strlen(w);	/* Null pattern is the whole string */
 	return w;
     }
 
-    if ((m = strchr(p, '%')) != NULL) {
+    const char *percent = strchr(p, '%');
+    if (percent != NULL) {	/* ${VAR:...%...=...} */
 	*hasPercent = TRUE;
-	if (*w == '\0') {
-		/* empty word does not match pattern */
-		return NULL;
-	}
-	/* check that the prefix matches */
-	for (; p != m && *w && *w == *p; w++, p++)
-	     continue;
+	if (*w == '\0')
+	    return NULL;	/* empty word does not match pattern */
 
-	if (p != m)
+	/* check that the prefix matches */
+	for (; p != percent && *w != '\0' && *w == *p; w++, p++)
+	     continue;
+	if (p != percent)
 	    return NULL;	/* No match */
 
-	if (*++p == '\0') {
+	p++;			/* Skip the percent */
+	if (*p == '\0') {
 	    /* No more pattern, return the rest of the string */
-	    *len = strlen(w);
+	    *match_len = strlen(w);
 	    return w;
 	}
     }
 
-    m = w;
+    /* Test whether the tail matches */
+    size_t w_len = strlen(w);
+    size_t p_len = strlen(p);
+    if (w_len < p_len)
+	return NULL;
 
-    /* Find a matching tail */
-    do {
-	if (strcmp(p, w) == 0) {
-	    *len = w - m;
-	    return m;
-	}
-    } while (*w++ != '\0');
+    const char *w_tail = w + w_len - p_len;
+    if (memcmp(p, w_tail, p_len) != 0)
+	return NULL;
 
-    return NULL;
+    *match_len = w_tail - w;
+    return w;
 }
-
-
-/*-
- *-----------------------------------------------------------------------
- * Str_SYSVSubst --
- *	Substitute '%' on the pattern with len characters from src.
- *	If the pattern does not contain a '%' prepend len characters
- *	from src.
- *
- * Side Effects:
- *	Places result on buf
- *-----------------------------------------------------------------------
- */
-static void
-Str_SYSVSubst(SepBuf *buf, const char *pat, const char *src, size_t len,
-	      Boolean lhsHasPercent)
-{
-    const char *m;
-
-    if ((m = strchr(pat, '%')) != NULL && lhsHasPercent) {
-	/* Copy the prefix */
-	SepBuf_AddBytesBetween(buf, pat, m);
-	/* skip the % */
-	pat = m + 1;
-    }
-    if (m != NULL || !lhsHasPercent) {
-	/* Copy the pattern */
-	SepBuf_AddBytes(buf, src, len);
-    }
-
-    /* append the rest */
-    SepBuf_AddStr(buf, pat);
-}
-
 
 typedef struct {
     GNode *ctx;
@@ -1275,16 +1231,34 @@ ModifyWord_SYSVSubst(const char *word, SepBuf *buf, void *data)
 {
     const ModifyWord_SYSVSubstArgs *args = data;
 
-    size_t len;
-    Boolean hasPercent;
-    const char *ptr = Str_SYSVMatch(word, args->lhs, &len, &hasPercent);
-    if (ptr != NULL) {
-	char *varexp = Var_Subst(args->rhs, args->ctx, VARE_WANTRES);
-	Str_SYSVSubst(buf, varexp, ptr, len, hasPercent);
-	free(varexp);
-    } else {
+    size_t match_len;
+    Boolean lhsPercent;
+    const char *match = Str_SYSVMatch(word, args->lhs, &match_len, &lhsPercent);
+    if (match == NULL) {
 	SepBuf_AddStr(buf, word);
+	return;
     }
+
+    /* Append rhs to the buffer, substituting the first '%' with the
+     * match, but only if the lhs had a '%' as well. */
+
+    char *rhs_expanded = Var_Subst(args->rhs, args->ctx, VARE_WANTRES);
+
+    const char *rhs = rhs_expanded;
+    const char *percent = strchr(rhs, '%');
+
+    if (percent != NULL && lhsPercent) {
+	/* Copy the prefix of the replacement pattern */
+	SepBuf_AddBytesBetween(buf, rhs, percent);
+	rhs = percent + 1;
+    }
+    if (percent != NULL || !lhsPercent)
+	SepBuf_AddBytes(buf, match, match_len);
+
+    /* Append the suffix of the replacement pattern */
+    SepBuf_AddStr(buf, rhs);
+
+    free(rhs_expanded);
 }
 #endif
 
@@ -1623,10 +1597,8 @@ ModifyWords(GNode *ctx, Byte sep, Boolean oneBigWord,
     }
 
     for (i = 0; i < ac; i++) {
-	size_t orig_count = result.buf.count;
 	modifyWord(av[i], &result, data);
-	size_t count = result.buf.count;
-	if (count != orig_count)
+	if (result.buf.count > 0)
 	    SepBuf_Sep(&result);
     }
 
@@ -2504,7 +2476,7 @@ ApplyModifier_Regex(const char *mod, ApplyModifiersState *st)
     int error = regcomp(&args.re, re, REG_EXTENDED);
     free(re);
     if (error) {
-	VarREError(error, &args.re, "RE substitution error");
+	VarREError(error, &args.re, "Regex compilation error");
 	free(args.replace);
 	return AMR_CLEANUP;
     }
@@ -2568,7 +2540,7 @@ ApplyModifier_ToSep(const char *sep, ApplyModifiersState *st)
 	get_numeric:
 	    st->sep = strtoul(sep + 1 + (sep[1] == 'x'), &end, base);
 	    if (*end != ':' && *end != st->endc)
-	        return AMR_BAD;
+		return AMR_BAD;
 	    st->next = end;
 	    break;
 	}
@@ -2729,7 +2701,7 @@ bad_modifier:
     return AMR_BAD;
 }
 
-/* :O or :Ox */
+/* :O or :Or or :Ox */
 static ApplyModifierResult
 ApplyModifier_Order(const char *mod, ApplyModifiersState *st)
 {
@@ -2754,10 +2726,10 @@ static ApplyModifierResult
 ApplyModifier_IfElse(const char *mod, ApplyModifiersState *st)
 {
     Boolean value = FALSE;
-    int cond_rc = 0;
     VarEvalFlags then_eflags = st->eflags & ~VARE_WANTRES;
     VarEvalFlags else_eflags = st->eflags & ~VARE_WANTRES;
 
+    int cond_rc = COND_PARSE;	/* anything other than COND_INVALID */
     if (st->eflags & VARE_WANTRES) {
 	cond_rc = Cond_EvalExpression(NULL, st->v->name, &value, 0, FALSE);
 	if (cond_rc != COND_INVALID && value)
@@ -2843,7 +2815,7 @@ ApplyModifier_Assign(const char *mod, ApplyModifiersState *st)
     char *sv_name = NULL;
     if (st->v->flags & VAR_JUNK) {
 	/*
-	 * We need to bmake_strdup() it incase ParseModifierPart() recurses.
+	 * We need to bmake_strdup() it in case ParseModifierPart() recurses.
 	 */
 	sv_name = st->v->name;
 	st->v->name = bmake_strdup(st->v->name);
@@ -3036,14 +3008,14 @@ ApplyModifier_SysV(const char *mod, ApplyModifiersState *st)
  *
  *	  :?<true-value>:<false-value>
  *			If the variable evaluates to true, return
- *			true value, else return the second value.
- *    	  :lhs=rhs  	Like :S, but the rhs goes to the end of
- *    			the invocation.
+ *			true-value, else return false-value.
+ *    	  :lhs=rhs  	Similar to :S, but the rhs goes to the end of
+ *    			the invocation, including any ':'.
  *	  :sh		Treat the current value as a command
  *			to be run, new value is its output.
  * The following added so we can handle ODE makefiles.
  *	  :@<tmpvar>@<newval>@
- *			Assign a temporary local variable <tmpvar>
+ *			Assign a temporary global variable <tmpvar>
  *			to the current value of each word in turn
  *			and replace each word with the result of
  *			evaluating <newval>
@@ -3056,7 +3028,7 @@ ApplyModifier_SysV(const char *mod, ApplyModifiersState *st)
  *			the common method of refering to the path
  *			of your dependent 'x' in a rule is to use
  *			the form '${x:P}'.
- *	  :!<cmd>!	Run cmd much the same as :sh run's the
+ *	  :!<cmd>!	Run cmd much the same as :sh runs the
  *			current value of the variable.
  * Assignment operators (see ApplyModifier_Assign).
  */
@@ -3115,7 +3087,7 @@ ApplyModifiers(
 		st.val = ApplyModifiers(&rval_pp, st.val, 0, 0, v,
 					ctxt, eflags, freePtr);
 		if (st.val == var_Error
-		    || (st.val == varNoError && (st.eflags & VARE_UNDEFERR) == 0)
+		    || (st.val == varNoError && !(st.eflags & VARE_UNDEFERR))
 		    || *rval_pp != '\0') {
 		    free(freeIt);
 		    goto out;	/* error already reported */
@@ -3138,7 +3110,7 @@ ApplyModifiers(
 	}
 	st.newVal = var_Error;		/* default value, in case of errors */
 	st.next = NULL; /* fail fast if an ApplyModifier forgets to set this */
-	ApplyModifierResult res = 0;
+	ApplyModifierResult res = AMR_BAD;	/* just a safe fallback */
 	char modifier = *p;
 	switch (modifier) {
 	case ':':
@@ -3446,7 +3418,7 @@ Var_Parse(const char * const str, GNode *ctxt, VarEvalFlags eflags,
 	if (v == NULL) {
 	    *lengthPtr = 2;
 
-	    if ((ctxt == VAR_CMD) || (ctxt == VAR_GLOBAL)) {
+	    if (ctxt == VAR_CMD || ctxt == VAR_GLOBAL) {
 		/*
 		 * If substituting a local variable in a non-local context,
 		 * assume it's for dynamic source stuff. We have to handle
@@ -3715,17 +3687,16 @@ Var_Subst(const char *str, GNode *ctxt, VarEvalFlags eflags)
     while (*str) {
 	if (*str == '\n' && trailingBslash)
 	    Buf_AddByte(&buf, ' ');
-	if ((*str == '$') && (str[1] == '$')) {
+	if (*str == '$' && str[1] == '$') {
 	    /*
-	     * A dollar sign may be escaped either with another dollar sign.
+	     * A dollar sign may be escaped with another dollar sign.
 	     * In such a case, we skip over the escape character and store the
 	     * dollar sign into the buffer directly.
 	     */
 	    if (save_dollars && (eflags & VARE_ASSIGN))
-		Buf_AddByte(&buf, *str);
-	    str++;
-	    Buf_AddByte(&buf, *str);
-	    str++;
+		Buf_AddByte(&buf, '$');
+	    Buf_AddByte(&buf, '$');
+	    str += 2;
 	} else if (*str != '$') {
 	    /*
 	     * Skip as many characters as possible -- either to the end of

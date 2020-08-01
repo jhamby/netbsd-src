@@ -1,4 +1,4 @@
-# $Id: modmisc.mk,v 1.30 2020/07/31 14:36:58 rillig Exp $
+# $Id: modmisc.mk,v 1.32 2020/08/01 17:26:41 rillig Exp $
 #
 # miscellaneous modifier tests
 
@@ -296,3 +296,29 @@ mod-range:
 	@echo ${a b c:L:range}			# ok
 	@echo ${a b c:L:rango}			# misspelled
 	@echo ${a b c:L:ranger}			# modifier name too long
+
+# To apply a modifier indirectly via another variable, the whole
+# modifier must be put into a single variable.
+.if ${value:L:${:US}${:U,value,replacement,}} != "S,value,replacement,}"
+.warning unexpected
+.endif
+
+# Adding another level of indirection (the 2 nested :U expressions) helps.
+.if ${value:L:${:U${:US}${:U,value,replacement,}}} != "replacement"
+.warning unexpected
+.endif
+
+# Multiple indirect modifiers can be applied one after another as long as
+# they are separated with colons.
+.if ${value:L:${:US,a,A,}:${:US,e,E,}} != "vAluE"
+.warning unexpected
+.endif
+
+# An indirect variable that evaluates to the empty string is allowed though.
+# This makes it possible to define conditional modifiers, like this:
+#
+# M.little-endian=	S,1234,4321,
+# M.big-endian=		# none
+.if ${value:L:${:Dempty}S,a,A,} != "vAlue"
+.warning unexpected
+.endif
