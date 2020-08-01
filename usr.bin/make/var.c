@@ -1,4 +1,4 @@
-/*	$NetBSD: var.c,v 1.385 2020/08/01 18:14:08 rillig Exp $	*/
+/*	$NetBSD: var.c,v 1.387 2020/08/01 19:19:05 rillig Exp $	*/
 
 /*
  * Copyright (c) 1988, 1989, 1990, 1993
@@ -69,14 +69,14 @@
  */
 
 #ifndef MAKE_NATIVE
-static char rcsid[] = "$NetBSD: var.c,v 1.385 2020/08/01 18:14:08 rillig Exp $";
+static char rcsid[] = "$NetBSD: var.c,v 1.387 2020/08/01 19:19:05 rillig Exp $";
 #else
 #include <sys/cdefs.h>
 #ifndef lint
 #if 0
 static char sccsid[] = "@(#)var.c	8.3 (Berkeley) 3/19/94";
 #else
-__RCSID("$NetBSD: var.c,v 1.385 2020/08/01 18:14:08 rillig Exp $");
+__RCSID("$NetBSD: var.c,v 1.387 2020/08/01 19:19:05 rillig Exp $");
 #endif
 #endif /* not lint */
 #endif
@@ -1720,47 +1720,6 @@ VarUniq(const char *str)
     return Buf_Destroy(&buf, FALSE);
 }
 
-/*-
- *-----------------------------------------------------------------------
- * VarRange --
- *	Return an integer sequence
- *
- * Input:
- *	str		String whose words provide default range
- *	ac		range length, if 0 use str words
- *
- * Side Effects:
- *	None.
- *
- *-----------------------------------------------------------------------
- */
-static char *
-VarRange(const char *str, int ac)
-{
-    Buffer	  buf;		/* Buffer for new string */
-    char 	**av;		/* List of words to affect */
-    char 	 *as;		/* Word list memory */
-    int 	  i;
-
-    Buf_Init(&buf, 0);
-    if (ac > 0) {
-	as = NULL;
-	av = NULL;
-    } else {
-	av = brk_string(str, &ac, FALSE, &as);
-    }
-    for (i = 0; i < ac; i++) {
-	if (i != 0)
-	    Buf_AddByte(&buf, ' ');
-	Buf_AddInt(&buf, 1 + i);
-    }
-
-    free(as);
-    free(av);
-
-    return Buf_Destroy(&buf, FALSE);
-}
-
 
 /*-
  * Parse a text part of a modifier such as the "from" and "to" in :S/from/to/
@@ -2264,7 +2223,8 @@ ApplyModifier_Exclam(const char *mod, ApplyModifiersState *st)
     return AMR_OK;
 }
 
-/* :range */
+/* The :range modifier generates an integer sequence as long as the words.
+ * The :range=7 modifier generates an integer sequence from 1 to 7. */
 static ApplyModifierResult
 ApplyModifier_Range(const char *mod, ApplyModifiersState *st)
 {
@@ -2280,7 +2240,25 @@ ApplyModifier_Range(const char *mod, ApplyModifiersState *st)
 	n = 0;
 	st->next = mod + 5;
     }
-    st->newVal = VarRange(st->val, n);
+
+    if (n == 0) {
+	char *as;
+	char **av = brk_string(st->val, &n, FALSE, &as);
+	free(as);
+	free(av);
+    }
+
+    Buffer buf;
+    Buf_Init(&buf, 0);
+
+    int i;
+    for (i = 0; i < n; i++) {
+	if (i != 0)
+	    Buf_AddByte(&buf, ' ');
+	Buf_AddInt(&buf, 1 + i);
+    }
+
+    st->newVal = Buf_Destroy(&buf, FALSE);
     return AMR_OK;
 }
 
@@ -2295,9 +2273,9 @@ ApplyModifier_Match(const char *mod, ApplyModifiersState *st)
      * original brace level.
      * XXX This will likely not work right if $() and ${} are intermixed.
      */
-    int nest = 1;
+    int nest = 0;
     const char *p;
-    for (p = mod + 1; *p != '\0' && !(*p == ':' && nest == 1); p++) {
+    for (p = mod + 1; *p != '\0' && !(*p == ':' && nest == 0); p++) {
 	if (*p == '\\' &&
 	    (p[1] == ':' || p[1] == st->endc || p[1] == st->startc)) {
 	    if (!needSubst)
@@ -2311,7 +2289,7 @@ ApplyModifier_Match(const char *mod, ApplyModifiersState *st)
 	    ++nest;
 	if (*p == ')' || *p == '}') {
 	    --nest;
-	    if (nest == 0)
+	    if (nest < 0)
 		break;
 	}
     }
