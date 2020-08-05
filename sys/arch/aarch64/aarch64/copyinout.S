@@ -1,4 +1,4 @@
-/* $NetBSD: copyinout.S,v 1.11 2020/08/02 06:58:16 maxv Exp $ */
+/* $NetBSD: copyinout.S,v 1.13 2020/08/03 06:29:59 ryo Exp $ */
 
 /*-
  * Copyright (c) 2014 The NetBSD Foundation, Inc.
@@ -33,7 +33,7 @@
 #include <aarch64/asm.h>
 #include "assym.h"
 
-RCSID("$NetBSD: copyinout.S,v 1.11 2020/08/02 06:58:16 maxv Exp $");
+RCSID("$NetBSD: copyinout.S,v 1.13 2020/08/03 06:29:59 ryo Exp $");
 
 #ifdef ARMV81_PAN
 #define PAN_ENABLE	\
@@ -63,7 +63,7 @@ RCSID("$NetBSD: copyinout.S,v 1.11 2020/08/02 06:58:16 maxv Exp $");
 	mov	x19, x0			/* x19 = arg0 */
 	mov	x20, x1			/* x20 = arg1 */
 
-	/* if (cpu_set_onfault(fb) != 0) return -1 */
+	/* if (cpu_set_onfault(fb) != 0) return error */
 	sub	sp, sp, #FB_T_SIZE	/* allocate struct faultbuf */
 	mov	x0, sp			/* x0 = faultbuf */
 	stp	x2, x3, [sp, #-16]!	/* save x2, x3 */
@@ -79,10 +79,8 @@ RCSID("$NetBSD: copyinout.S,v 1.11 2020/08/02 06:58:16 maxv Exp $");
 	.endm
 
 	.macro exit_cpu_onfault
-	/* curlwp->l_md.md_onfault = NULL */
-	mrs	x0, tpidr_el1			/* curcpu */
-	ldr	x0, [x0, #CI_CURLWP]		/* x0 = curlwp */
-	str	xzr, [x0, #L_MD_ONFAULT]	/* lwp->l_md_onfault = NULL */
+	bl	cpu_unset_onfault
+	mov	x8, xzr
 9:
 	PAN_ENABLE				/* enable PAN */
 	add	sp, sp, #FB_T_SIZE		/* pop stack */
@@ -350,3 +348,50 @@ ENTRY(kcopy)
 	exit_cpu_onfault
 	ret
 END(kcopy)
+
+
+/* LINTSTUB: int _ucas_32(volatile uint32_t *uptr, uint32_t old, uint32_t new, uint32_t *retp); */
+ENTRY(_ucas_32)
+	tbnz	x0, AARCH64_ADDRTOP_TAG_BIT, 3f	/* not userspace */
+	ands	x8, x0, #3
+	cbnz	x8, 3f				/* not aligned */
+
+	enter_cpu_onfault
+
+1:	ldxr	w4, [x0]		/* load old value */
+	cmp	w4, w1			/*   compare? */
+	b.ne	2f			/*     return if different */
+	stxr	w5, w2, [x0]		/* store new value */
+	cbnz	w5, 1b			/*   succeed? nope, try again. */
+2:	str	w4, [x3]
+	mov	x8, #0			/* error = 0 */
+
+	exit_cpu_onfault
+	ret
+3:
+	mov	x0, #EFAULT
+	ret
+END(_ucas_32)
+
+/* LINTSTUB: int _ucas_64(volatile uint64_t *uptr, uint64_t old, uint64_t new, uint64_t *retp); */
+ENTRY(_ucas_64)
+	tbnz	x0, AARCH64_ADDRTOP_TAG_BIT, 3f	/* not userspace */
+	ands	x8, x0, #7
+	cbnz	x8, 3f				/* not aligned */
+
+	enter_cpu_onfault
+
+1:	ldxr	x4, [x0]		/* load old value */
+	cmp	x4, x1			/*   compare? */
+	b.ne	2f			/*     return if different */
+	stxr	w5, x2, [x0]		/* store new value */
+	cbnz	w5, 1b			/*   succeed? nope, try again. */
+2:	str	x4, [x3]
+	mov	x8, #0			/* error = 0 */
+
+	exit_cpu_onfault
+	ret
+3:
+	mov	x0, #EFAULT
+	ret
+END(_ucas_64)
