@@ -234,7 +234,6 @@ CPUFLAGS+=	-Wa,--fatal-warnings
 #CPUFLAGS+=	-mno-abicalls -fno-PIC
 #.endif
 CFLAGS+=	${CPUFLAGS}
-
 AFLAGS+=	${CPUFLAGS}
 
 .if ${KCOV:U0} > 0
