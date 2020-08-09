@@ -1,4 +1,4 @@
-# $Id: modmisc.mk,v 1.33 2020/08/03 15:43:32 rillig Exp $
+# $Id: modmisc.mk,v 1.36 2020/08/08 13:09:55 rillig Exp $
 #
 # miscellaneous modifier tests
 
@@ -30,6 +30,7 @@ all:	mod-quote
 all:	mod-break-many-words
 all:	mod-remember
 all:	mod-gmtime
+all:	mod-gmtime-indirect
 all:	mod-localtime
 all:	mod-hash
 all:	mod-range
@@ -148,6 +149,11 @@ mod-subst:
 mod-subst-chain:
 	@echo $@:
 	@echo ${:Ua b c:S,a,A,S,b,B,}.
+	# There is no 'i' modifier for the :S or :C modifiers.
+	# The error message is "make: Unknown modifier 'i'", which is
+	# kind of correct, although it is mixing the terms for variable
+	# modifiers with the matching modifiers.
+	@echo ${:Uvalue:S,a,x,i}.
 
 mod-regex:
 	@echo $@:
@@ -164,6 +170,19 @@ mod-regex:
 # Therefore, in -dL mode, this is forbidden, see lint.mk.
 mod-loop-varname:
 	@echo :${:Uone two three:@${:Ubar:S,b,v,}@+${var}+@:Q}:
+	# ":::" is a very creative variable name, unlikely in practice
+	# The expression ${\:\:\:} would not work since backslashes can only
+	# be escaped in the modifiers, but not in the variable name.
+	@echo :${:U1 2 3:@:::@x${${:U\:\:\:}}y@}:
+	# "@@" is another creative variable name.
+	@echo :${:U1 2 3:@\@\@@x${@@}y@}:
+	# Even "@" works as a variable name since the variable is installed
+	# in the "current" scope, which in this case is the one from the
+	# target.
+	@echo :$@: :${:U1 2 3:@\@@x${@}y@}: :$@:
+	# In extreme cases, even the backslash can be used as variable name.
+	# It needs to be doubled though.
+	@echo :${:U1 2 3:@\\@x${${:Ux:S,x,\\,}}y@}:
 
 # The :@ modifier resolves the variables a little more often than expected.
 # In particular, it resolves _all_ variables from the context, and not only
@@ -276,6 +295,16 @@ mod-gmtime:
 	@echo ${%Y:L:gmtime=1593536400}		# 2020-07-01T00:00:00Z
 	@echo ${%Y:L:gmtimer=1593536400}	# modifier name too long
 	@echo ${%Y:L:gm=gm:M*}
+
+mod-gmtime-indirect:
+	@echo $@:
+	# It's not possible to pass the seconds via a variable expression.
+	# Parsing of the :gmtime modifier stops at the '$' and returns to
+	# ApplyModifiers.  There, a colon would be skipped but not a dollar.
+	# Parsing continues by looking at the next modifier.  Now the ${:U}
+	# is expanded and interpreted as a variable modifier, which results
+	# in the error message "Unknown modifier '1'".
+	@echo ${%Y:L:gmtime=${:U1593536400}}
 
 mod-localtime:
 	@echo $@:

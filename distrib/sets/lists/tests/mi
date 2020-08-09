@@ -1,4 +1,4 @@
-# $NetBSD: mi,v 1.884 2020/08/03 15:43:31 rillig Exp $
+# $NetBSD: mi,v 1.886 2020/08/07 19:24:27 rillig Exp $
 #
 # Note: don't delete entries from here - mark them as "obsolete" instead.
 #
@@ -4558,6 +4558,8 @@
 ./usr/tests/usr.bin/make/unit-tests/export-all.mk	tests-usr.bin-tests	compattestfile,atf
 ./usr/tests/usr.bin/make/unit-tests/export-env.exp	tests-usr.bin-tests	compattestfile,atf
 ./usr/tests/usr.bin/make/unit-tests/export-env.mk	tests-usr.bin-tests	compattestfile,atf
+./usr/tests/usr.bin/make/unit-tests/export-variants.exp	tests-usr.bin-tests	compattestfile,atf
+./usr/tests/usr.bin/make/unit-tests/export-variants.mk	tests-usr.bin-tests	compattestfile,atf
 ./usr/tests/usr.bin/make/unit-tests/export.exp	tests-usr.bin-tests	compattestfile,atf
 ./usr/tests/usr.bin/make/unit-tests/export.mk	tests-usr.bin-tests	compattestfile,atf
 ./usr/tests/usr.bin/make/unit-tests/forloop.exp	tests-usr.bin-tests	compattestfile,atf
@@ -4598,6 +4600,8 @@
 ./usr/tests/usr.bin/make/unit-tests/posix1.mk	tests-usr.bin-tests	compattestfile,atf
 ./usr/tests/usr.bin/make/unit-tests/qequals.exp	tests-usr.bin-tests	compattestfile,atf
 ./usr/tests/usr.bin/make/unit-tests/qequals.mk	tests-usr.bin-tests	compattestfile,atf
+./usr/tests/usr.bin/make/unit-tests/recursive.exp	tests-usr.bin-tests	compattestfile,atf
+./usr/tests/usr.bin/make/unit-tests/recursive.mk	tests-usr.bin-tests	compattestfile,atf
 ./usr/tests/usr.bin/make/unit-tests/suffixes.exp	tests-usr.bin-tests	compattestfile,atf
 ./usr/tests/usr.bin/make/unit-tests/suffixes.mk	tests-usr.bin-tests	compattestfile,atf
 ./usr/tests/usr.bin/make/unit-tests/sunshcmd.exp	tests-usr.bin-tests	compattestfile,atf

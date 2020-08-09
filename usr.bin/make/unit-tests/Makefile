@@ -1,4 +1,4 @@
-# $NetBSD: Makefile,v 1.83 2020/08/03 15:43:32 rillig Exp $
+# $NetBSD: Makefile,v 1.89 2020/08/07 19:24:27 rillig Exp $
 #
 # Unit tests for make(1)
 #
@@ -52,10 +52,11 @@ TESTS+=		# escape	# broken by reverting POSIX changes
 TESTS+=		export
 TESTS+=		export-all
 TESTS+=		export-env
+TESTS+=		export-variants
 TESTS+=		forloop
 TESTS+=		forsubst
 TESTS+=		hash
-TESTS+=		# impsrc	# broken by reverting POSIX changes
+TESTS+=		impsrc
 TESTS+=		include-main
 TESTS+=		lint
 TESTS+=		misc
@@ -66,11 +67,12 @@ TESTS+=		modorder
 TESTS+=		modts
 TESTS+=		modword
 TESTS+=		order
-TESTS+=		# phony-end	# broken by reverting POSIX changes
+TESTS+=		phony-end
 TESTS+=		posix
 TESTS+=		# posix1	# broken by reverting POSIX changes
 TESTS+=		qequals
-TESTS+=		# suffixes	# broken by reverting POSIX changes
+TESTS+=		recursive
+TESTS+=		# suffixes	# runs into an endless loop (try -dA)
 TESTS+=		sunshcmd
 TESTS+=		sysv
 TESTS+=		ternary
@@ -89,7 +91,9 @@ TESTS+=		varshell
 ENV.counter=		-i
 ENV.envfirst=		FROM_ENV=value-from-env
 ENV.export=		-i PATH=${PATH:Q}
+ENV.export-variants=	-i PATH=${PATH:Q}
 ENV.lint=		-i
+ENV.recursive=		-i
 ENV.varmisc=		FROM_ENV=env
 ENV.varmisc+=		FROM_ENV_BEFORE=env
 ENV.varmisc+=		FROM_ENV_AFTER=env
@@ -101,6 +105,7 @@ FLAGS.envfirst=		-e
 FLAGS.export=		-r
 FLAGS.lint=		-dL -k
 FLAGS.order=		-j1
+FLAGS.recursive=	-dL -r
 FLAGS.vardebug=		-k -dv FROM_CMDLINE=
 
 # Some tests need extra post-processing.
@@ -113,6 +118,10 @@ SED_CMDS.varshell+=	-e '/command/s,No such.*,not found,'
 # Some tests need an additional round of postprocessing.
 POSTPROC.counter=	${TOOL_SED} -n -e '/:RELEVANT = yes/,/:RELEVANT = no/p'
 POSTPROC.vardebug=	${TOOL_SED} -n -e '/:RELEVANT = yes/,/:RELEVANT = no/p'
+
+export-all.rawout: export.mk
+unexport.rawout: export.mk
+unexport-env.rawout: export.mk
 
 # End of the configuration section.
 
