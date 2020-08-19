@@ -1,4 +1,4 @@
-/*	$NetBSD: asm.h,v 1.58 2020/08/06 10:00:20 skrll Exp $	*/
+/*	$NetBSD: asm.h,v 1.61 2020/08/12 08:56:37 skrll Exp $	*/
 
 /*
  * Copyright (c) 1992, 1993
@@ -60,6 +60,13 @@
 
 #include <sys/cdefs.h>		/* for API selection */
 #include <mips/regdef.h>
+
+#define	__BIT(n)	(1 << (n))
+#define	__BITS(hi,lo)	((~((~0)<<((hi)+1)))&((~0)<<(lo)))
+
+#define	__LOWEST_SET_BIT(__mask) ((((__mask) - 1) & (__mask)) ^ (__mask))
+#define	__SHIFTOUT(__x, __mask) (((__x) & (__mask)) / __LOWEST_SET_BIT(__mask))
+#define	__SHIFTIN(__x, __mask) ((__x) * __LOWEST_SET_BIT(__mask))
 
 /*
  * Define -pg profile entry code.
@@ -517,23 +524,21 @@ _C_LABEL(x):
 #define	NOP_L		/* nothing */
 #endif
 
-#if defined(MULTIPROCESSOR)
-#if defined(MIPS64_OCTEON)
+/* compiler define */
+#if defined(__OCTEON__)
 				/* early cnMIPS have erratum which means 2 */
 #define	LLSCSYNC	sync 4; sync 4
 #define	SYNC		sync 4		/* sync 4 == syncw - sync all writes */
 #define	BDSYNC		sync 4		/* sync 4 == syncw - sync all writes */
-#else
-#define	LLSCSYNC	/* nothing (something?) */
+#elif __mips >= 3 || !defined(__mips_o32)
+#define	LLSCSYNC	sync
 #define	SYNC		sync
 #define	BDSYNC		sync
-#endif
 #else
 #define	LLSCSYNC	/* nothing */
 #define	SYNC		/* nothing */
 #define	BDSYNC		nop
-#endif /* defined(MULTIPROCESSOR) */
-
+#endif
 
 /* CPU dependent hook for cp0 load delays */
 #if defined(MIPS1) || defined(MIPS2) || defined(MIPS3)

@@ -1,4 +1,4 @@
-#	$NetBSD: bsd.own.mk,v 1.1202 2020/07/21 14:42:44 tsutsui Exp $
+#	$NetBSD: bsd.own.mk,v 1.1204 2020/08/16 06:43:05 mrg Exp $
 
 # This needs to be before bsd.init.mk
 .if defined(BSD_MK_COMPAT_FILE)
@@ -63,9 +63,6 @@ TOOLCHAIN_MISSING?=	no
 #
 # What GCC is used?
 #
-.if ${MACHINE_CPU} == "m68k"
-HAVE_GCC?=	7
-.endif
 HAVE_GCC?=	8
 
 #
@@ -83,7 +80,7 @@ EXTERNAL_GCC_SUBDIR?=	gcc.old
 .elif ${HAVE_GCC} == 8
 EXTERNAL_GCC_SUBDIR?=	gcc
 .else
-EXTERNAL_GCC_SUBDIR=?	/does/not/exist
+EXTERNAL_GCC_SUBDIR?=	/does/not/exist
 .endif
 .else
 MKGCCCMDS?=	no
