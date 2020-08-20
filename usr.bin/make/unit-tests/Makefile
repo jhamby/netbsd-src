@@ -1,4 +1,4 @@
-# $NetBSD: Makefile,v 1.100 2020/08/16 20:43:01 rillig Exp $
+# $NetBSD: Makefile,v 1.104 2020/08/20 18:05:57 rillig Exp $
 #
 # Unit tests for make(1)
 #
@@ -40,6 +40,7 @@ TESTS+=		cmdline
 TESTS+=		comment
 TESTS+=		cond-cmp-numeric
 TESTS+=		cond-cmp-string
+TESTS+=		cond-func
 TESTS+=		cond-func-commands
 TESTS+=		cond-func-defined
 TESTS+=		cond-func-empty
@@ -305,11 +306,14 @@ ENV.varmisc+=		FROM_ENV_BEFORE=env
 ENV.varmisc+=		FROM_ENV_AFTER=env
 
 # Override make flags for some of the tests; default is -k.
+FLAGS.archive=		-dA
 FLAGS.counter=		-dv
 FLAGS.doterror=		# none
 FLAGS.envfirst=		-e
 FLAGS.export=		# none
 FLAGS.lint=		-dL -k
+FLAGS.opt-no-action=	-n
+FLAGS.opt-query=	-q
 FLAGS.order=		-j1
 FLAGS.recursive=	-dL
 FLAGS.vardebug=		-k -dv FROM_CMDLINE=
