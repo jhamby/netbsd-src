@@ -1,4 +1,4 @@
-/*	$NetBSD: main.c,v 1.304 2020/08/11 18:52:03 rillig Exp $	*/
+/*	$NetBSD: main.c,v 1.308 2020/08/22 15:17:09 rillig Exp $	*/
 
 /*
  * Copyright (c) 1988, 1989, 1990, 1993
@@ -69,7 +69,7 @@
  */
 
 #ifndef MAKE_NATIVE
-static char rcsid[] = "$NetBSD: main.c,v 1.304 2020/08/11 18:52:03 rillig Exp $";
+static char rcsid[] = "$NetBSD: main.c,v 1.308 2020/08/22 15:17:09 rillig Exp $";
 #else
 #include <sys/cdefs.h>
 #ifndef lint
@@ -81,7 +81,7 @@ __COPYRIGHT("@(#) Copyright (c) 1988, 1989, 1990, 1993\
 #if 0
 static char sccsid[] = "@(#)main.c	8.3 (Berkeley) 3/19/94";
 #else
-__RCSID("$NetBSD: main.c,v 1.304 2020/08/11 18:52:03 rillig Exp $");
+__RCSID("$NetBSD: main.c,v 1.308 2020/08/22 15:17:09 rillig Exp $");
 #endif
 #endif /* not lint */
 #endif
@@ -543,7 +543,7 @@ rearg:
 		case 'v':
 			if (argvalue == NULL) goto noarg;
 			printVars = c == 'v' ? EXPAND_VARS : COMPAT_VARS;
-			(void)Lst_AtEnd(variables, argvalue);
+			Lst_AppendS(variables, argvalue);
 			Var_Append(MAKEFLAGS, "-V", VAR_GLOBAL);
 			Var_Append(MAKEFLAGS, argvalue, VAR_GLOBAL);
 			break;
@@ -571,7 +571,7 @@ rearg:
 			break;
 		case 'f':
 			if (argvalue == NULL) goto noarg;
-			(void)Lst_AtEnd(makefiles, argvalue);
+			Lst_AppendS(makefiles, argvalue);
 			break;
 		case 'i':
 			ignoreErrors = TRUE;
@@ -660,7 +660,7 @@ rearg:
 				Punt("illegal (null) argument.");
 			if (*argv[1] == '-' && !dashDash)
 				goto rearg;
-			(void)Lst_AtEnd(create, bmake_strdup(argv[1]));
+			Lst_AppendS(create, bmake_strdup(argv[1]));
 		}
 
 	return;
@@ -810,7 +810,7 @@ str2Lst_Append(Lst lp, char *str, const char *sep)
 	sep = " \t";
 
     for (n = 0, cp = strtok(str, sep); cp; cp = strtok(NULL, sep)) {
-	(void)Lst_AtEnd(lp, cp);
+	Lst_AppendS(lp, cp);
 	n++;
     }
     return n;
@@ -873,7 +873,7 @@ doPrintVars(void)
 
 	for (ln = Lst_First(variables); ln != NULL;
 	    ln = Lst_Succ(ln)) {
-		char *var = (char *)Lst_Datum(ln);
+		char *var = Lst_DatumS(ln);
 		const char *value;
 		char *p1;
 
@@ -1082,11 +1082,11 @@ main(int argc, char **argv)
 		VAR_GLOBAL);
 	Var_Set(MAKE_DEPENDFILE, ".depend", VAR_GLOBAL);
 
-	create = Lst_Init(FALSE);
-	makefiles = Lst_Init(FALSE);
+	create = Lst_Init();
+	makefiles = Lst_Init();
 	printVars = 0;
 	debugVflag = FALSE;
-	variables = Lst_Init(FALSE);
+	variables = Lst_Init();
 	beSilent = FALSE;		/* Print commands as executed */
 	ignoreErrors = FALSE;		/* Pay attention to non-zero returns */
 	noExecute = FALSE;		/* Execute all commands */
@@ -1168,7 +1168,7 @@ main(int argc, char **argv)
 #ifdef USE_META
 	meta_init();
 #endif
-	Dir_Init(NULL);		/* Dir_* safe to call from MainParseArgs */
+	Dir_Init();
 
 	/*
 	 * First snag any flags out of the MAKE environment variable.
@@ -1249,7 +1249,7 @@ main(int argc, char **argv)
 	 * and * finally _PATH_OBJDIRPREFIX`pwd`, in that order.  If none
 	 * of these paths exist, just use .CURDIR.
 	 */
-	Dir_Init(curdir);
+	Dir_InitDir(curdir);
 	(void)Main_SetObjdir("%s", curdir);
 
 	if (!Main_SetVarObjdir("MAKEOBJDIRPREFIX", curdir) &&
@@ -1281,10 +1281,8 @@ main(int argc, char **argv)
 	if (!Lst_IsEmpty(create)) {
 		LstNode ln;
 
-		for (ln = Lst_First(create); ln != NULL;
-		    ln = Lst_Succ(ln)) {
-			char *name = (char *)Lst_Datum(ln);
-
+		for (ln = Lst_First(create); ln != NULL; ln = Lst_Succ(ln)) {
+			char *name = Lst_DatumS(ln);
 			Var_Append(".TARGETS", name, VAR_GLOBAL);
 		}
 	} else
@@ -1328,7 +1326,7 @@ main(int argc, char **argv)
 	if (!noBuiltins) {
 		LstNode ln;
 
-		sysMkPath = Lst_Init(FALSE);
+		sysMkPath = Lst_Init();
 		Dir_Expand(_PATH_DEFSYSMK,
 			   Lst_IsEmpty(sysIncPath) ? defIncPath : sysIncPath,
 			   sysMkPath);
@@ -1338,7 +1336,7 @@ main(int argc, char **argv)
 		ln = Lst_Find(sysMkPath, NULL, ReadMakefile);
 		if (ln == NULL)
 			Fatal("%s: cannot open %s.", progname,
-			    (char *)Lst_Datum(ln));
+			    (char *)Lst_DatumS(ln));
 	}
 
 	if (!Lst_IsEmpty(makefiles)) {
@@ -1347,7 +1345,7 @@ main(int argc, char **argv)
 		ln = Lst_Find(makefiles, NULL, ReadAllMakefiles);
 		if (ln != NULL)
 			Fatal("%s: cannot open %s.", progname,
-			    (char *)Lst_Datum(ln));
+			    (char *)Lst_DatumS(ln));
 	} else {
 	    p1 = Var_Subst("${" MAKEFILE_PREFERENCE "}",
 		VAR_CMD, VARE_WANTRES);

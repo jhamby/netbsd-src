@@ -1,4 +1,4 @@
-/*	$NetBSD: compat.c,v 1.118 2020/08/01 14:47:49 rillig Exp $	*/
+/*	$NetBSD: compat.c,v 1.124 2020/08/22 15:43:32 rillig Exp $	*/
 
 /*
  * Copyright (c) 1988, 1989, 1990 The Regents of the University of California.
@@ -70,14 +70,14 @@
  */
 
 #ifndef MAKE_NATIVE
-static char rcsid[] = "$NetBSD: compat.c,v 1.118 2020/08/01 14:47:49 rillig Exp $";
+static char rcsid[] = "$NetBSD: compat.c,v 1.124 2020/08/22 15:43:32 rillig Exp $";
 #else
 #include <sys/cdefs.h>
 #ifndef lint
 #if 0
 static char sccsid[] = "@(#)compat.c	8.2 (Berkeley) 3/19/94";
 #else
-__RCSID("$NetBSD: compat.c,v 1.118 2020/08/01 14:47:49 rillig Exp $");
+__RCSID("$NetBSD: compat.c,v 1.124 2020/08/22 15:43:32 rillig Exp $");
 #endif
 #endif /* not lint */
 #endif
@@ -187,7 +187,7 @@ CompatInterrupt(int signo)
 	kill(myPid, signo);
     }
 }
-
+
 /*-
  *-----------------------------------------------------------------------
  * CompatRunCommand --
@@ -223,8 +223,6 @@ CompatRunCommand(void *cmdp, void *gnp)
     char	** volatile mav;/* Copy of the argument vector for freeing */
     int	    	  argc;	    	/* Number of arguments in av or 0 if not
 				 * dynamically allocated */
-    Boolean 	  local;    	/* TRUE if command should be executed
-				 * locally */
     Boolean 	  useShell;    	/* TRUE if command should be executed
 				 * using a shell */
     char	  * volatile cmd = (char *)cmdp;
@@ -234,7 +232,7 @@ CompatRunCommand(void *cmdp, void *gnp)
     errCheck = !(gn->type & OP_IGNORE);
     doIt = FALSE;
 
-    cmdNode = Lst_Member(gn->commands, cmd);
+    cmdNode = Lst_MemberS(gn->commands, cmd);
     cmdStart = Var_Subst(cmd, gn, VARE_WANTRES);
 
     /*
@@ -249,10 +247,10 @@ CompatRunCommand(void *cmdp, void *gnp)
 	return 0;
     }
     cmd = cmdStart;
-    Lst_Replace(cmdNode, cmdStart);
+    Lst_ReplaceS(cmdNode, cmdStart);
 
     if ((gn->type & OP_SAVE_CMDS) && (gn != ENDNode)) {
-	(void)Lst_AtEnd(ENDNode->commands, cmdStart);
+	Lst_AppendS(ENDNode->commands, cmdStart);
 	return 0;
     }
     if (strcmp(cmdStart, "...") == 0) {
@@ -367,8 +365,6 @@ again:
 	av = (void *)mav;
     }
 
-    local = TRUE;
-
 #ifdef USE_META
     if (useMeta) {
 	meta_compat_start();
@@ -389,10 +385,7 @@ again:
 	    meta_compat_child();
 	}
 #endif
-	if (local)
-	    (void)execvp(av[0], (char *const *)UNCONST(av));
-	else
-	    (void)execv(av[0], (char *const *)UNCONST(av));
+	(void)execvp(av[0], (char *const *)UNCONST(av));
 	execError("exec", av[0]);
 	_exit(1);
     }
@@ -400,7 +393,7 @@ again:
     free(mav);
     free(bp);
 
-    Lst_Replace(cmdNode, NULL);
+    Lst_ReplaceS(cmdNode, NULL);
 
 #ifdef USE_META
     if (useMeta) {
@@ -499,7 +492,7 @@ again:
 
     return status;
 }
-
+
 /*-
  *-----------------------------------------------------------------------
  * Compat_Make --
@@ -545,7 +538,7 @@ Compat_Make(void *gnp, void *pgnp)
 	    goto cohorts;
 	}
 
-	if (Lst_Member(gn->iParents, pgn) != NULL) {
+	if (Lst_MemberS(gn->iParents, pgn) != NULL) {
 	    char *p1;
 	    Var_Set(IMPSRC, Var_Value(TARGET, gn, &p1), pgn);
 	    bmake_free(p1);
@@ -649,7 +642,7 @@ Compat_Make(void *gnp, void *pgnp)
 	 */
 	pgn->flags &= ~REMAKE;
     } else {
-	if (Lst_Member(gn->iParents, pgn) != NULL) {
+	if (Lst_MemberS(gn->iParents, pgn) != NULL) {
 	    char *p1;
 	    Var_Set(IMPSRC, Var_Value(TARGET, gn, &p1), pgn);
 	    bmake_free(p1);
@@ -680,7 +673,7 @@ cohorts:
     Lst_ForEach(gn->cohorts, Compat_Make, pgnp);
     return 0;
 }
-
+
 /*-
  *-----------------------------------------------------------------------
  * Compat_Run --
@@ -753,8 +746,8 @@ Compat_Run(Lst targs)
      *	    	  	    could not be made due to errors.
      */
     errors = 0;
-    while (!Lst_IsEmpty (targs)) {
-	gn = (GNode *)Lst_DeQueue(targs);
+    while (!Lst_IsEmpty(targs)) {
+	gn = Lst_DequeueS(targs);
 	Compat_Make(gn, gn);
 
 	if (gn->made == UPTODATE) {

@@ -1,4 +1,4 @@
-/*	$NetBSD: arch.c,v 1.83 2020/08/12 19:36:14 rillig Exp $	*/
+/*	$NetBSD: arch.c,v 1.90 2020/08/22 15:46:28 rillig Exp $	*/
 
 /*
  * Copyright (c) 1988, 1989, 1990, 1993
@@ -69,14 +69,14 @@
  */
 
 #ifndef MAKE_NATIVE
-static char rcsid[] = "$NetBSD: arch.c,v 1.83 2020/08/12 19:36:14 rillig Exp $";
+static char rcsid[] = "$NetBSD: arch.c,v 1.90 2020/08/22 15:46:28 rillig Exp $";
 #else
 #include <sys/cdefs.h>
 #ifndef lint
 #if 0
 static char sccsid[] = "@(#)arch.c	8.2 (Berkeley) 1/2/94";
 #else
-__RCSID("$NetBSD: arch.c,v 1.83 2020/08/12 19:36:14 rillig Exp $");
+__RCSID("$NetBSD: arch.c,v 1.90 2020/08/22 15:46:28 rillig Exp $");
 #endif
 #endif /* not lint */
 #endif
@@ -377,7 +377,7 @@ Arch_ParseArchive(char **linePtr, Lst nodeLst, GNode *ctxt)
 		    return FAILURE;
 		} else {
 		    gn->type |= OP_ARCHV;
-		    (void)Lst_AtEnd(nodeLst, gn);
+		    Lst_AppendS(nodeLst, gn);
 		}
 	    } else if (Arch_ParseArchive(&sacrifice, nodeLst, ctxt)!=SUCCESS) {
 		/*
@@ -392,14 +392,13 @@ Arch_ParseArchive(char **linePtr, Lst nodeLst, GNode *ctxt)
 	     */
 	    free(buf);
 	} else if (Dir_HasWildcards(memName)) {
-	    Lst	  members = Lst_Init(FALSE);
-	    char  *member;
+	    Lst	  members = Lst_Init();
 	    size_t sz = MAXPATHLEN, nsz;
 	    nameBuf = bmake_malloc(sz);
 
 	    Dir_Expand(memName, dirSearchPath, members);
 	    while (!Lst_IsEmpty(members)) {
-		member = (char *)Lst_DeQueue(members);
+		char *member = Lst_DequeueS(members);
 		nsz = strlen(libName) + strlen(member) + 3;
 		if (sz > nsz)
 		    nameBuf = bmake_realloc(nameBuf, sz = nsz * 2);
@@ -419,7 +418,7 @@ Arch_ParseArchive(char **linePtr, Lst nodeLst, GNode *ctxt)
 		     * end of the provided list.
 		     */
 		    gn->type |= OP_ARCHV;
-		    (void)Lst_AtEnd(nodeLst, gn);
+		    Lst_AppendS(nodeLst, gn);
 		}
 	    }
 	    Lst_Destroy(members, NULL);
@@ -441,7 +440,7 @@ Arch_ParseArchive(char **linePtr, Lst nodeLst, GNode *ctxt)
 		 * provided list.
 		 */
 		gn->type |= OP_ARCHV;
-		(void)Lst_AtEnd(nodeLst, gn);
+		Lst_AppendS(nodeLst, gn);
 	    }
 	}
 	if (doSubst) {
@@ -545,7 +544,7 @@ ArchStatMember(const char *archive, const char *member, Boolean hash)
 
     ln = Lst_Find(archives, archive, ArchFindArchive);
     if (ln != NULL) {
-	ar = (Arch *)Lst_Datum(ln);
+	ar = Lst_DatumS(ln);
 
 	he = Hash_FindEntry(&ar->members, member);
 
@@ -694,7 +693,7 @@ ArchStatMember(const char *archive, const char *member, Boolean hash)
 
     fclose(arch);
 
-    (void)Lst_AtEnd(archives, ar);
+    Lst_AppendS(archives, ar);
 
     /*
      * Now that the archive has been read and cached, we can look into
@@ -1039,11 +1038,7 @@ Arch_Touch(GNode *gn)
  *-----------------------------------------------------------------------
  */
 void
-#if !defined(RANLIBMAG)
-Arch_TouchLib(GNode *gn MAKE_ATTR_UNUSED)
-#else
 Arch_TouchLib(GNode *gn)
-#endif
 {
 #ifdef RANLIBMAG
     FILE *	    arch;	/* Stream open to archive */
@@ -1060,6 +1055,8 @@ Arch_TouchLib(GNode *gn)
 	times.actime = times.modtime = now;
 	utime(gn->path, &times);
     }
+#else
+    (void)gn;
 #endif
 }
 
@@ -1130,8 +1127,8 @@ Arch_MemMTime(GNode *gn)
 	gn->mtime = 0;
 	return 0;
     }
-    while ((ln = Lst_Next(gn->parents)) != NULL) {
-	pgn = (GNode *)Lst_Datum(ln);
+    while ((ln = Lst_NextS(gn->parents)) != NULL) {
+	pgn = Lst_DatumS(ln);
 
 	if (pgn->type & OP_ARCHV) {
 	    /*
@@ -1158,7 +1155,7 @@ Arch_MemMTime(GNode *gn)
 	}
     }
 
-    Lst_Close(gn->parents);
+    Lst_CloseS(gn->parents);
 
     return gn->mtime;
 }
@@ -1305,7 +1302,7 @@ Arch_LibOODate(GNode *gn)
 void
 Arch_Init(void)
 {
-    archives = Lst_Init(FALSE);
+    archives = Lst_Init();
 }
 
 

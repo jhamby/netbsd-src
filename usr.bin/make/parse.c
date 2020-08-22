@@ -1,4 +1,4 @@
-/*	$NetBSD: parse.c,v 1.251 2020/08/10 19:53:19 rillig Exp $	*/
+/*	$NetBSD: parse.c,v 1.257 2020/08/22 15:17:09 rillig Exp $	*/
 
 /*
  * Copyright (c) 1988, 1989, 1990, 1993
@@ -69,14 +69,14 @@
  */
 
 #ifndef MAKE_NATIVE
-static char rcsid[] = "$NetBSD: parse.c,v 1.251 2020/08/10 19:53:19 rillig Exp $";
+static char rcsid[] = "$NetBSD: parse.c,v 1.257 2020/08/22 15:17:09 rillig Exp $";
 #else
 #include <sys/cdefs.h>
 #ifndef lint
 #if 0
 static char sccsid[] = "@(#)parse.c	8.3 (Berkeley) 3/19/94";
 #else
-__RCSID("$NetBSD: parse.c,v 1.251 2020/08/10 19:53:19 rillig Exp $");
+__RCSID("$NetBSD: parse.c,v 1.257 2020/08/22 15:17:09 rillig Exp $");
 #endif
 #endif /* not lint */
 #endif
@@ -854,11 +854,11 @@ ParseLinkSrc(void *pgnp, void *cgnp)
     GNode          *pgn = (GNode *)pgnp;
     GNode          *cgn = (GNode *)cgnp;
 
-    if ((pgn->type & OP_DOUBLEDEP) && !Lst_IsEmpty (pgn->cohorts))
-	pgn = (GNode *)Lst_Datum(Lst_Last(pgn->cohorts));
-    (void)Lst_AtEnd(pgn->children, cgn);
+    if ((pgn->type & OP_DOUBLEDEP) && !Lst_IsEmpty(pgn->cohorts))
+	pgn = Lst_DatumS(Lst_Last(pgn->cohorts));
+    Lst_AppendS(pgn->children, cgn);
     if (specType == Not)
-	    (void)Lst_AtEnd(cgn->parents, pgn);
+	Lst_AppendS(cgn->parents, pgn);
     pgn->unmade += 1;
     if (DEBUG(PARSE)) {
 	fprintf(debug_file, "# %s: added child %s - %s\n", __func__,
@@ -934,7 +934,7 @@ ParseDoOp(void *gnp, void *opp)
 	 * traversals will no longer see this node anyway. -mycroft)
 	 */
 	cohort->type = op | OP_INVISIBLE;
-	(void)Lst_AtEnd(gn->cohorts, cohort);
+	Lst_AppendS(gn->cohorts, cohort);
 	cohort->centurion = gn;
 	gn->unmade_cohorts += 1;
 	snprintf(cohort->cohort_num, sizeof cohort->cohort_num, "#%d",
@@ -1017,7 +1017,7 @@ ParseDoSrc(int tOp, const char *src)
 	 * invoked if the user didn't specify a target on the command
 	 * line. This is to allow #ifmake's to succeed, or something...
 	 */
-	(void)Lst_AtEnd(create, bmake_strdup(src));
+	Lst_AppendS(create, bmake_strdup(src));
 	/*
 	 * Add the name to the .TARGETS variable as well, so the user can
 	 * employ that, if desired.
@@ -1034,8 +1034,8 @@ ParseDoSrc(int tOp, const char *src)
 	if (doing_depend)
 	    ParseMark(gn);
 	if (predecessor != NULL) {
-	    (void)Lst_AtEnd(predecessor->order_succ, gn);
-	    (void)Lst_AtEnd(gn->order_pred, predecessor);
+	    Lst_AppendS(predecessor->order_succ, gn);
+	    Lst_AppendS(gn->order_pred, predecessor);
 	    if (DEBUG(PARSE)) {
 		fprintf(debug_file, "# %s: added Order dependency %s - %s\n",
 		    __func__, predecessor->name, gn->name);
@@ -1206,7 +1206,7 @@ ParseDoDependency(char *line)
     specType = Not;
     paths = NULL;
 
-    curTargs = Lst_Init(FALSE);
+    curTargs = Lst_Init();
 
     /*
      * First, grind through the targets.
@@ -1354,9 +1354,9 @@ ParseDoDependency(char *line)
 		switch (specType) {
 		case ExPath:
 		    if (paths == NULL) {
-			paths = Lst_Init(FALSE);
+			paths = Lst_Init();
 		    }
-		    (void)Lst_AtEnd(paths, dirSearchPath);
+		    Lst_AppendS(paths, dirSearchPath);
 		    break;
 		case Main:
 		    if (!Lst_IsEmpty(create)) {
@@ -1372,12 +1372,12 @@ ParseDoDependency(char *line)
 		    if (doing_depend)
 			ParseMark(gn);
 		    gn->type |= OP_NOTMAIN|OP_SPECIAL;
-		    (void)Lst_AtEnd(targets, gn);
+		    Lst_AppendS(targets, gn);
 		    break;
 		case Default:
 		    gn = Targ_NewGN(".DEFAULT");
 		    gn->type |= (OP_NOTMAIN|OP_TRANSFORM);
-		    (void)Lst_AtEnd(targets, gn);
+		    Lst_AppendS(targets, gn);
 		    DEFAULT = gn;
 		    break;
 		case DeleteOnError:
@@ -1412,9 +1412,9 @@ ParseDoDependency(char *line)
 		    goto out;
 		} else {
 		    if (paths == NULL) {
-			paths = Lst_Init(FALSE);
+			paths = Lst_Init();
 		    }
-		    (void)Lst_AtEnd(paths, path);
+		    Lst_AppendS(paths, path);
 		}
 	    }
 	}
@@ -1431,7 +1431,7 @@ ParseDoDependency(char *line)
 		 * use Dir_Destroy in the destruction of the path as the
 		 * Dir module could have added a directory to the path...
 		 */
-		Lst	    emptyPath = Lst_Init(FALSE);
+		Lst	    emptyPath = Lst_Init();
 
 		Dir_Expand(line, emptyPath, curTargs);
 
@@ -1441,13 +1441,13 @@ ParseDoDependency(char *line)
 		 * No wildcards, but we want to avoid code duplication,
 		 * so create a list with the word on it.
 		 */
-		(void)Lst_AtEnd(curTargs, line);
+		Lst_AppendS(curTargs, line);
 	    }
 
 	    /* Apply the targets. */
 
 	    while(!Lst_IsEmpty(curTargs)) {
-		char	*targName = (char *)Lst_DeQueue(curTargs);
+		char *targName = Lst_DequeueS(curTargs);
 
 		if (!Suff_IsTransform (targName)) {
 		    gn = Targ_FindNode(targName, TARG_CREATE);
@@ -1457,7 +1457,7 @@ ParseDoDependency(char *line)
 		if (doing_depend)
 		    ParseMark(gn);
 
-		(void)Lst_AtEnd(targets, gn);
+		Lst_AppendS(targets, gn);
 	    }
 	} else if (specType == ExPath && *line != '.' && *line != '\0') {
 	    Parse_Error(PARSE_WARNING, "Extra target (%s) ignored", line);
@@ -1714,15 +1714,15 @@ ParseDoDependency(char *line)
 	    }
 
 	    if (*cp == LPAREN) {
-		sources = Lst_Init(FALSE);
+		sources = Lst_Init();
 		if (Arch_ParseArchive(&line, sources, VAR_CMD) != SUCCESS) {
 		    Parse_Error(PARSE_FATAL,
 				 "Error in source archive spec \"%s\"", line);
 		    goto out;
 		}
 
-		while (!Lst_IsEmpty (sources)) {
-		    gn = (GNode *)Lst_DeQueue(sources);
+		while (!Lst_IsEmpty(sources)) {
+		    gn = Lst_DequeueS(sources);
 		    ParseDoSrc(tOp, gn->name);
 		}
 		Lst_Destroy(sources, NULL);
@@ -2083,19 +2083,19 @@ ParseAddCmd(void *gnp, void *cmd)
     GNode *gn = (GNode *)gnp;
 
     /* Add to last (ie current) cohort for :: targets */
-    if ((gn->type & OP_DOUBLEDEP) && !Lst_IsEmpty (gn->cohorts))
-	gn = (GNode *)Lst_Datum(Lst_Last(gn->cohorts));
+    if ((gn->type & OP_DOUBLEDEP) && !Lst_IsEmpty(gn->cohorts))
+	gn = Lst_DatumS(Lst_Last(gn->cohorts));
 
     /* if target already supplied, ignore commands */
     if (!(gn->type & OP_HAS_COMMANDS)) {
-	(void)Lst_AtEnd(gn->commands, cmd);
+	Lst_AppendS(gn->commands, cmd);
 	if (ParseMaybeSubMake(cmd))
 	    gn->type |= OP_SUBMAKE;
 	ParseMark(gn);
     } else {
 #ifdef notyet
 	/* XXX: We cannot do this until we fix the tree */
-	(void)Lst_AtEnd(gn->commands, cmd);
+	Lst_AppendS(gn->commands, cmd);
 	Parse_Error(PARSE_WARNING,
 		     "overriding commands for target \"%s\"; "
 		     "previous commands defined at %s: %d ignored",
@@ -2479,7 +2479,7 @@ Parse_SetInput(const char *name, int line, int fd,
 
     if (curFile != NULL)
 	/* Save exiting file info */
-	Lst_AtFront(includes, curFile);
+	Lst_PrependS(includes, curFile);
 
     /* Allocate and fill in new structure */
     curFile = bmake_malloc(sizeof *curFile);
@@ -2745,9 +2745,8 @@ ParseEOF(void)
     free(curFile->P_str);
     free(curFile);
 
-    curFile = Lst_DeQueue(includes);
-
-    if (curFile == NULL) {
+    if (Lst_IsEmpty(includes)) {
+        curFile = NULL;
 	/* We've run out of input */
 	Var_Delete(".PARSEDIR", VAR_GLOBAL);
 	Var_Delete(".PARSEFILE", VAR_GLOBAL);
@@ -2756,6 +2755,7 @@ ParseEOF(void)
 	return DONE;
     }
 
+    curFile = Lst_DequeueS(includes);
     if (DEBUG(PARSE))
 	fprintf(debug_file, "ParseEOF: returning to file %s, line %d\n",
 	    curFile->fname, curFile->lineno);
@@ -3135,7 +3135,7 @@ Parse_File(const char *name, int fd)
 			cp = bmake_strdup(cp);
 			Lst_ForEach(targets, ParseAddCmd, cp);
 #ifdef CLEANUP
-			Lst_AtEnd(targCmds, cp);
+			Lst_AppendS(targCmds, cp);
 #endif
 		    }
 		}
@@ -3242,7 +3242,7 @@ Parse_File(const char *name, int fd)
 	    if (targets)
 		Lst_Destroy(targets, NULL);
 
-	    targets = Lst_Init(FALSE);
+	    targets = Lst_Init();
 	    inLine = TRUE;
 
 	    ParseDoDependency(line);
@@ -3284,12 +3284,12 @@ void
 Parse_Init(void)
 {
     mainNode = NULL;
-    parseIncPath = Lst_Init(FALSE);
-    sysIncPath = Lst_Init(FALSE);
-    defIncPath = Lst_Init(FALSE);
-    includes = Lst_Init(FALSE);
+    parseIncPath = Lst_Init();
+    sysIncPath = Lst_Init();
+    defIncPath = Lst_Init();
+    includes = Lst_Init();
 #ifdef CLEANUP
-    targCmds = Lst_Init(FALSE);
+    targCmds = Lst_Init();
 #endif
 }
 
@@ -3327,17 +3327,17 @@ Parse_MainName(void)
 {
     Lst           mainList;	/* result list */
 
-    mainList = Lst_Init(FALSE);
+    mainList = Lst_Init();
 
     if (mainNode == NULL) {
 	Punt("no target to make.");
 	/*NOTREACHED*/
     } else if (mainNode->type & OP_DOUBLEDEP) {
-	(void)Lst_AtEnd(mainList, mainNode);
+	Lst_AppendS(mainList, mainNode);
 	Lst_Concat(mainList, mainNode->cohorts, LST_CONCNEW);
     }
     else
-	(void)Lst_AtEnd(mainList, mainNode);
+	Lst_AppendS(mainList, mainNode);
     Var_Append(".TARGETS", mainNode->name, VAR_GLOBAL);
     return mainList;
 }

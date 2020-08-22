@@ -1,4 +1,4 @@
-/*      $NetBSD: meta.c,v 1.92 2020/08/03 20:26:09 rillig Exp $ */
+/*      $NetBSD: meta.c,v 1.96 2020/08/22 15:17:09 rillig Exp $ */
 
 /*
  * Implement 'meta' mode.
@@ -625,7 +625,7 @@ meta_mode_init(const char *make_mode)
     /*
      * We consider ourselves master of all within ${.MAKE.META.BAILIWICK}
      */
-    metaBailiwick = Lst_Init(FALSE);
+    metaBailiwick = Lst_Init();
     metaBailiwickStr = Var_Subst("${.MAKE.META.BAILIWICK:O:u:tA}",
 	VAR_GLOBAL, VARE_WANTRES);
     if (metaBailiwickStr) {
@@ -634,7 +634,7 @@ meta_mode_init(const char *make_mode)
     /*
      * We ignore any paths that start with ${.MAKE.META.IGNORE_PATHS}
      */
-    metaIgnorePaths = Lst_Init(FALSE);
+    metaIgnorePaths = Lst_Init();
     Var_Append(MAKE_META_IGNORE_PATHS,
 	       "/dev /etc /proc /tmp /var/run /var/tmp ${TMPDIR}", VAR_GLOBAL);
     metaIgnorePathsStr = Var_Subst("${" MAKE_META_IGNORE_PATHS ":O:u:tA}",
@@ -1117,7 +1117,7 @@ meta_oodate(GNode *gn, Boolean oodate)
 	goto oodate_out;
     dname = fname3;
 
-    missingFiles = Lst_Init(FALSE);
+    missingFiles = Lst_Init();
 
     /*
      * We need to check if the target is out-of-date. This includes
@@ -1340,8 +1340,8 @@ meta_oodate(GNode *gn, Boolean oodate)
 			    do {
 				nln = Lst_FindFrom(missingFiles, Lst_Succ(ln),
 						   p, path_match);
-				tp = Lst_Datum(ln);
-				Lst_Remove(missingFiles, ln);
+				tp = Lst_DatumS(ln);
+				Lst_RemoveS(missingFiles, ln);
 				free(tp);
 			    } while ((ln = nln) != NULL);
 			}
@@ -1410,7 +1410,7 @@ meta_oodate(GNode *gn, Boolean oodate)
 			(link_src == NULL && cached_stat(p, &fs) < 0)) {
 			if (!meta_ignore(gn, p)) {
 			    if (Lst_Find(missingFiles, p, string_match) == NULL)
-				Lst_AtEnd(missingFiles, bmake_strdup(p));
+				Lst_AppendS(missingFiles, bmake_strdup(p));
 			}
 		    }
 		    break;
@@ -1496,7 +1496,7 @@ meta_oodate(GNode *gn, Boolean oodate)
 			     * We cannot catch every eventuality here...
 			     */
 			    if (Lst_Find(missingFiles, p, string_match) == NULL)
-				    Lst_AtEnd(missingFiles, bmake_strdup(p));
+				Lst_AppendS(missingFiles, bmake_strdup(p));
 			}
 		    }
 		    if (buf[0] == 'E') {
@@ -1519,7 +1519,7 @@ meta_oodate(GNode *gn, Boolean oodate)
 			fprintf(debug_file, "%s: %d: there were more build commands in the meta data file than there are now...\n", fname, lineno);
 		    oodate = TRUE;
 		} else {
-		    char *cmd = (char *)Lst_Datum(ln);
+		    char *cmd = Lst_DatumS(ln);
 		    Boolean hasOODATE = FALSE;
 
 		    if (strstr(cmd, "$?"))
@@ -1596,7 +1596,7 @@ meta_oodate(GNode *gn, Boolean oodate)
 	if (!Lst_IsEmpty(missingFiles)) {
 	    if (DEBUG(META))
 		fprintf(debug_file, "%s: missing files: %s...\n",
-			fname, (char *)Lst_Datum(Lst_First(missingFiles)));
+			fname, (char *)Lst_DatumS(Lst_First(missingFiles)));
 	    oodate = TRUE;
 	}
 	if (!oodate && !have_filemon && filemonMissing) {

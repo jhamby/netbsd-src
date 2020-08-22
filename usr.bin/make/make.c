@@ -1,4 +1,4 @@
-/*	$NetBSD: make.c,v 1.103 2020/08/01 09:55:00 rillig Exp $	*/
+/*	$NetBSD: make.c,v 1.118 2020/08/22 15:43:32 rillig Exp $	*/
 
 /*
  * Copyright (c) 1988, 1989, 1990, 1993
@@ -69,14 +69,14 @@
  */
 
 #ifndef MAKE_NATIVE
-static char rcsid[] = "$NetBSD: make.c,v 1.103 2020/08/01 09:55:00 rillig Exp $";
+static char rcsid[] = "$NetBSD: make.c,v 1.118 2020/08/22 15:43:32 rillig Exp $";
 #else
 #include <sys/cdefs.h>
 #ifndef lint
 #if 0
 static char sccsid[] = "@(#)make.c	8.1 (Berkeley) 6/6/93";
 #else
-__RCSID("$NetBSD: make.c,v 1.103 2020/08/01 09:55:00 rillig Exp $");
+__RCSID("$NetBSD: make.c,v 1.118 2020/08/22 15:43:32 rillig Exp $");
 #endif
 #endif /* not lint */
 #endif
@@ -189,7 +189,7 @@ MakeTimeStamp(void *pgn, void *cgn)
 {
     return Make_TimeStamp((GNode *)pgn, (GNode *)cgn);
 }
-
+
 /*-
  *-----------------------------------------------------------------------
  * Make_OODate --
@@ -350,7 +350,7 @@ Make_OODate(GNode *gn)
 
     return oodate;
 }
-
+
 /*-
  *-----------------------------------------------------------------------
  * MakeAddChild  --
@@ -378,11 +378,11 @@ MakeAddChild(void *gnp, void *lp)
 	if (DEBUG(MAKE))
 	    fprintf(debug_file, "MakeAddChild: need to examine %s%s\n",
 		gn->name, gn->cohort_num);
-	(void)Lst_EnQueue(l, gn);
+	Lst_EnqueueS(l, gn);
     }
     return 0;
 }
-
+
 /*-
  *-----------------------------------------------------------------------
  * MakeFindChild  --
@@ -412,31 +412,18 @@ MakeFindChild(void *gnp, void *pgnp)
 
     return 0;
 }
-
-/*-
- *-----------------------------------------------------------------------
- * Make_HandleUse --
- *	Function called by Make_Run and SuffApplyTransform on the downward
- *	pass to handle .USE and transformation nodes. It implements the
- *	.USE and transformation functionality by copying the node's commands,
- *	type flags and children to the parent node.
+
+/* Called by Make_Run and SuffApplyTransform on the downward pass to handle
+ * .USE and transformation nodes, by copying the child node's commands, type
+ * flags and children to the parent node.
  *
- *	A .USE node is much like an explicit transformation rule, except
- *	its commands are always added to the target node, even if the
- *	target already has commands.
+ * A .USE node is much like an explicit transformation rule, except its
+ * commands are always added to the target node, even if the target already
+ * has commands.
  *
  * Input:
  *	cgn		The .USE node
  *	pgn		The target of the .USE node
- *
- * Results:
- *	none
- *
- * Side Effects:
- *	Children and commands may be added to the parent and the parent's
- *	type may be changed.
- *
- *-----------------------------------------------------------------------
  */
 void
 Make_HandleUse(GNode *cgn, GNode *pgn)
@@ -452,26 +439,17 @@ Make_HandleUse(GNode *cgn, GNode *pgn)
 
     if ((cgn->type & (OP_USE|OP_USEBEFORE)) || Lst_IsEmpty(pgn->commands)) {
 	    if (cgn->type & OP_USEBEFORE) {
-		/*
-		 * .USEBEFORE --
-		 *	prepend the child's commands to the parent.
-		 */
-		Lst cmds = pgn->commands;
-		pgn->commands = Lst_Duplicate(cgn->commands, NULL);
-		(void)Lst_Concat(pgn->commands, cmds, LST_CONCNEW);
-		Lst_Destroy(cmds, NULL);
+		/* .USEBEFORE */
+		Lst_PrependAllS(pgn->commands, cgn->commands);
 	    } else {
-		/*
-		 * .USE or target has no commands --
-		 *	append the child's commands to the parent.
-		 */
-		(void)Lst_Concat(pgn->commands, cgn->commands, LST_CONCNEW);
+		/* .USE, or target has no commands */
+		Lst_AppendAllS(pgn->commands, cgn->commands);
 	    }
     }
 
     if (Lst_Open(cgn->children) == SUCCESS) {
-	while ((ln = Lst_Next(cgn->children)) != NULL) {
-	    GNode *tgn, *gn = (GNode *)Lst_Datum(ln);
+	while ((ln = Lst_NextS(cgn->children)) != NULL) {
+	    GNode *tgn, *gn = Lst_DatumS(ln);
 
 	    /*
 	     * Expand variables in the .USE node's name
@@ -492,11 +470,11 @@ Make_HandleUse(GNode *cgn, GNode *pgn)
 		    gn = tgn;
 	    }
 
-	    (void)Lst_AtEnd(pgn->children, gn);
-	    (void)Lst_AtEnd(gn->parents, pgn);
+	    Lst_AppendS(pgn->children, gn);
+	    Lst_AppendS(gn->parents, pgn);
 	    pgn->unmade += 1;
 	}
-	Lst_Close(cgn->children);
+	Lst_CloseS(cgn->children);
     }
 
     pgn->type |= cgn->type & ~(OP_OPMASK|OP_USE|OP_USEBEFORE|OP_TRANSFORM);
@@ -547,8 +525,8 @@ MakeHandleUse(void *cgnp, void *pgnp)
      * children the parent has. This is used by Make_Run to decide
      * whether to queue the parent or examine its children...
      */
-    if ((ln = Lst_Member(pgn->children, cgn)) != NULL) {
-	Lst_Remove(pgn->children, ln);
+    if ((ln = Lst_MemberS(pgn->children, cgn)) != NULL) {
+	Lst_RemoveS(pgn->children, ln);
 	pgn->unmade--;
     }
     return 0;
@@ -725,8 +703,8 @@ Make_Update(GNode *cgn)
 
     /* Now mark all the parents as having one less unmade child */
     if (Lst_Open(parents) == SUCCESS) {
-	while ((ln = Lst_Next(parents)) != NULL) {
-	    pgn = (GNode *)Lst_Datum(ln);
+	while ((ln = Lst_NextS(parents)) != NULL) {
+	    pgn = Lst_DatumS(ln);
 	    if (DEBUG(MAKE))
 		fprintf(debug_file, "inspect parent %s%s: flags %x, "
 			    "type %x, made %d, unmade %d ",
@@ -816,9 +794,9 @@ Make_Update(GNode *cgn)
 	    }
 	    /* Ok, we can schedule the parent again */
 	    pgn->made = REQUESTED;
-	    (void)Lst_EnQueue(toBeMade, pgn);
+	    Lst_EnqueueS(toBeMade, pgn);
 	}
-	Lst_Close(parents);
+	Lst_CloseS(parents);
     }
 
     /*
@@ -828,8 +806,8 @@ Make_Update(GNode *cgn)
     if (Lst_Open(cgn->iParents) == SUCCESS) {
 	const char *cpref = Var_Value(PREFIX, cgn, &p1);
 
-	while ((ln = Lst_Next(cgn->iParents)) != NULL) {
-	    pgn = (GNode *)Lst_Datum(ln);
+	while ((ln = Lst_NextS(cgn->iParents)) != NULL) {
+	    pgn = Lst_DatumS(ln);
 	    if (pgn->flags & REMAKE) {
 		Var_Set(IMPSRC, cname, pgn);
 		if (cpref != NULL)
@@ -837,10 +815,10 @@ Make_Update(GNode *cgn)
 	    }
 	}
 	bmake_free(p1);
-	Lst_Close(cgn->iParents);
+	Lst_CloseS(cgn->iParents);
     }
 }
-
+
 /*-
  *-----------------------------------------------------------------------
  * MakeAddAllSrc --
@@ -934,7 +912,7 @@ MakeAddAllSrc(void *cgnp, void *pgnp)
     }
     return 0;
 }
-
+
 /*-
  *-----------------------------------------------------------------------
  * Make_DoAllVar --
@@ -980,7 +958,7 @@ Make_DoAllVar(GNode *gn)
     }
     gn->flags |= DONE_ALLSRC;
 }
-
+
 /*-
  *-----------------------------------------------------------------------
  * MakeStartJobs --
@@ -1035,9 +1013,9 @@ MakeBuildChild(void *v_cn, void *toBeMade_next)
 
     cn->made = REQUESTED;
     if (toBeMade_next == NULL)
-	Lst_AtEnd(toBeMade, cn);
+	Lst_AppendS(toBeMade, cn);
     else
-	Lst_InsertBefore(toBeMade, toBeMade_next, cn);
+	Lst_InsertBeforeS(toBeMade, toBeMade_next, cn);
 
     if (cn->unmade_cohorts != 0)
 	Lst_ForEach(cn->cohorts, MakeBuildChild, toBeMade_next);
@@ -1072,13 +1050,13 @@ MakeStartJobs(void)
     GNode	*gn;
     int		have_token = 0;
 
-    while (!Lst_IsEmpty (toBeMade)) {
+    while (!Lst_IsEmpty(toBeMade)) {
 	/* Get token now to avoid cycling job-list when we only have 1 token */
 	if (!have_token && !Job_TokenWithdraw())
 	    break;
 	have_token = 1;
 
-	gn = (GNode *)Lst_DeQueue(toBeMade);
+	gn = Lst_DequeueS(toBeMade);
 	if (DEBUG(MAKE))
 	    fprintf(debug_file, "Examining %s%s...\n",
 		    gn->name, gn->cohort_num);
@@ -1147,7 +1125,7 @@ MakeStartJobs(void)
 
     return FALSE;
 }
-
+
 /*-
  *-----------------------------------------------------------------------
  * MakePrintStatus --
@@ -1262,7 +1240,7 @@ MakePrintStatus(void *gnp, void *v_errors)
     Lst_ForEach(gn->children, MakePrintStatus, errors);
     return 0;
 }
-
+
 
 /*-
  *-----------------------------------------------------------------------
@@ -1291,8 +1269,8 @@ Make_ExpandUse(Lst targs)
      * be looked at in a minute, otherwise we add its children to our queue
      * and go on about our business.
      */
-    while (!Lst_IsEmpty (examine)) {
-	gn = (GNode *)Lst_DeQueue(examine);
+    while (!Lst_IsEmpty(examine)) {
+	gn = Lst_DequeueS(examine);
 
 	if (gn->flags & REMAKE)
 	    /* We've looked at this one already */
@@ -1369,8 +1347,8 @@ link_parent(void *cnp, void *pnp)
     GNode *cn = cnp;
     GNode *pn = pnp;
 
-    Lst_AtEnd(pn->children, cn);
-    Lst_AtEnd(cn->parents, pn);
+    Lst_AppendS(pn->children, cn);
+    Lst_AppendS(cn->parents, pn);
     pn->unmade++;
     return 0;
 }
@@ -1392,9 +1370,9 @@ add_wait_dep(void *v_cn, void *v_wn)
 	 fprintf(debug_file, ".WAIT: add dependency %s%s -> %s\n",
 		cn->name, cn->cohort_num, wn->name);
 
-    Lst_AtEnd(wn->children, cn);
+    Lst_AppendS(wn->children, cn);
     wn->unmade++;
-    Lst_AtEnd(cn->parents, wn);
+    Lst_AppendS(cn->parents, wn);
     return 0;
 }
 
@@ -1417,18 +1395,18 @@ Make_ProcessWait(Lst targs)
     pgn->flags = REMAKE;
     pgn->type = OP_PHONY | OP_DEPENDS;
     /* Get it displayed in the diag dumps */
-    Lst_AtFront(Targ_List(), pgn);
+    Lst_PrependS(Targ_List(), pgn);
 
     Lst_ForEach(targs, link_parent, pgn);
 
     /* Start building with the 'dummy' .MAIN' node */
     MakeBuildChild(pgn, NULL);
 
-    examine = Lst_Init(FALSE);
-    Lst_AtEnd(examine, pgn);
+    examine = Lst_Init();
+    Lst_AppendS(examine, pgn);
 
-    while (!Lst_IsEmpty (examine)) {
-	pgn = Lst_DeQueue(examine);
+    while (!Lst_IsEmpty(examine)) {
+	pgn = Lst_DequeueS(examine);
 
 	/* We only want to process each child-list once */
 	if (pgn->flags & DONE_WAIT)
@@ -1446,18 +1424,18 @@ Make_ProcessWait(Lst targs)
 	}
 
 	owln = Lst_First(pgn->children);
-	Lst_Open(pgn->children);
-	for (; (ln = Lst_Next(pgn->children)) != NULL; ) {
-	    cgn = Lst_Datum(ln);
+	Lst_OpenS(pgn->children);
+	for (; (ln = Lst_NextS(pgn->children)) != NULL; ) {
+	    cgn = Lst_DatumS(ln);
 	    if (cgn->type & OP_WAIT) {
 		/* Make the .WAIT node depend on the previous children */
 		Lst_ForEachFrom(pgn->children, owln, add_wait_dep, cgn);
 		owln = ln;
 	    } else {
-		Lst_AtEnd(examine, cgn);
+		Lst_AppendS(examine, cgn);
 	    }
 	}
-	Lst_Close(pgn->children);
+	Lst_CloseS(pgn->children);
     }
 
     Lst_Destroy(examine, NULL);
@@ -1493,7 +1471,7 @@ Make_Run(Lst targs)
     int	    	    errors; 	/* Number of errors the Job module reports */
 
     /* Start trying to make the current targets... */
-    toBeMade = Lst_Init(FALSE);
+    toBeMade = Lst_Init();
 
     Make_ExpandUse(targs);
     Make_ProcessWait(targs);

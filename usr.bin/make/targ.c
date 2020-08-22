@@ -1,4 +1,4 @@
-/*	$NetBSD: targ.c,v 1.64 2020/07/20 18:12:48 sjg Exp $	*/
+/*	$NetBSD: targ.c,v 1.70 2020/08/22 15:17:09 rillig Exp $	*/
 
 /*
  * Copyright (c) 1988, 1989, 1990, 1993
@@ -69,14 +69,14 @@
  */
 
 #ifndef MAKE_NATIVE
-static char rcsid[] = "$NetBSD: targ.c,v 1.64 2020/07/20 18:12:48 sjg Exp $";
+static char rcsid[] = "$NetBSD: targ.c,v 1.70 2020/08/22 15:17:09 rillig Exp $";
 #else
 #include <sys/cdefs.h>
 #ifndef lint
 #if 0
 static char sccsid[] = "@(#)targ.c	8.2 (Berkeley) 3/19/94";
 #else
-__RCSID("$NetBSD: targ.c,v 1.64 2020/07/20 18:12:48 sjg Exp $");
+__RCSID("$NetBSD: targ.c,v 1.70 2020/08/22 15:17:09 rillig Exp $");
 #endif
 #endif /* not lint */
 #endif
@@ -167,7 +167,7 @@ static int TargPropagateNode(void *, void *);
 void
 Targ_Init(void)
 {
-    allTargets = Lst_Init(FALSE);
+    allTargets = Lst_Init();
     Hash_InitTable(&targets, HTSIZE);
 }
 
@@ -258,22 +258,22 @@ Targ_NewGN(const char *name)
     gn->checked =	0;
     gn->mtime =		0;
     gn->cmgn =		NULL;
-    gn->iParents =  	Lst_Init(FALSE);
-    gn->cohorts =   	Lst_Init(FALSE);
-    gn->parents =   	Lst_Init(FALSE);
-    gn->children =  	Lst_Init(FALSE);
-    gn->order_pred =  	Lst_Init(FALSE);
-    gn->order_succ =  	Lst_Init(FALSE);
+    gn->iParents =  	Lst_Init();
+    gn->cohorts =   	Lst_Init();
+    gn->parents =   	Lst_Init();
+    gn->children =  	Lst_Init();
+    gn->order_pred =  	Lst_Init();
+    gn->order_succ =  	Lst_Init();
     Hash_InitTable(&gn->context, 0);
-    gn->commands =  	Lst_Init(FALSE);
+    gn->commands =  	Lst_Init();
     gn->suffix =	NULL;
     gn->lineno =	0;
     gn->fname = 	NULL;
 
 #ifdef CLEANUP
     if (allGNs == NULL)
-	allGNs = Lst_Init(FALSE);
-    Lst_AtEnd(allGNs, gn);
+	allGNs = Lst_Init();
+    Lst_AppendS(allGNs, gn);
 #endif
 
     return gn;
@@ -360,7 +360,7 @@ Targ_FindNode(const char *name, int flags)
     if (!(flags & TARG_NOHASH))
 	Hash_SetValue(he, gn);
     Var_Append(".ALLTARGETS", name, VAR_GLOBAL);
-    (void)Lst_AtEnd(allTargets, gn);
+    Lst_AppendS(allTargets, gn);
     if (doing_depend)
 	gn->flags |= FROM_DEPEND;
     return gn;
@@ -393,26 +393,24 @@ Targ_FindList(Lst names, int flags)
     GNode	   *gn;		/* node in tLn */
     char    	   *name;
 
-    nodes = Lst_Init(FALSE);
+    nodes = Lst_Init();
 
-    if (Lst_Open(names) == FAILURE) {
-	return nodes;
-    }
-    while ((ln = Lst_Next(names)) != NULL) {
-	name = (char *)Lst_Datum(ln);
+    Lst_OpenS(names);
+    while ((ln = Lst_NextS(names)) != NULL) {
+	name = Lst_DatumS(ln);
 	gn = Targ_FindNode(name, flags);
 	if (gn != NULL) {
 	    /*
-	     * Note: Lst_AtEnd must come before the Lst_Concat so the nodes
+	     * Note: Lst_Append must come before the Lst_Concat so the nodes
 	     * are added to the list in the order in which they were
 	     * encountered in the makefile.
 	     */
-	    (void)Lst_AtEnd(nodes, gn);
+	    Lst_AppendS(nodes, gn);
 	} else if (flags == TARG_NOCREATE) {
 	    Error("\"%s\" -- target unknown.", name);
 	}
     }
-    Lst_Close(names);
+    Lst_CloseS(names);
     return nodes;
 }
 

@@ -1,4 +1,4 @@
-/*	$NetBSD: job.c,v 1.206 2020/08/10 19:53:19 rillig Exp $	*/
+/*	$NetBSD: job.c,v 1.212 2020/08/22 15:43:32 rillig Exp $	*/
 
 /*
  * Copyright (c) 1988, 1989, 1990 The Regents of the University of California.
@@ -70,14 +70,14 @@
  */
 
 #ifndef MAKE_NATIVE
-static char rcsid[] = "$NetBSD: job.c,v 1.206 2020/08/10 19:53:19 rillig Exp $";
+static char rcsid[] = "$NetBSD: job.c,v 1.212 2020/08/22 15:43:32 rillig Exp $";
 #else
 #include <sys/cdefs.h>
 #ifndef lint
 #if 0
 static char sccsid[] = "@(#)job.c	8.2 (Berkeley) 3/19/94";
 #else
-__RCSID("$NetBSD: job.c,v 1.206 2020/08/10 19:53:19 rillig Exp $");
+__RCSID("$NetBSD: job.c,v 1.212 2020/08/22 15:43:32 rillig Exp $");
 #endif
 #endif /* not lint */
 #endif
@@ -300,7 +300,7 @@ const char *shellPath = NULL,		  	  /* full pathname of
 						   * executable image */
 	   *shellName = NULL;		      	  /* last component of shell */
 char *shellErrFlag = NULL;
-static const char *shellArgv = NULL;		  /* Custom shell args */
+static char *shellArgv = NULL;	/* Custom shell args */
 
 
 STATIC Job	*job_table;	/* The structures that describe them */
@@ -714,8 +714,8 @@ JobPrintCommand(void *cmdp, void *jobp)
     if (strcmp(cmd, "...") == 0) {
 	job->node->type |= OP_SAVE_CMDS;
 	if ((job->flags & JOB_IGNDOTS) == 0) {
-	    job->tailCmds = Lst_Succ(Lst_Member(job->node->commands,
-						cmd));
+	    LstNode dotsNode = Lst_MemberS(job->node->commands, cmd);
+	    job->tailCmds = Lst_Succ(dotsNode);
 	    return 1;
 	}
 	return 0;
@@ -918,7 +918,7 @@ static int
 JobSaveCommand(void *cmd, void *gn)
 {
     cmd = Var_Subst((char *)cmd, (GNode *)gn, VARE_WANTRES);
-    (void)Lst_AtEnd(postCommands->commands, cmd);
+    Lst_AppendS(postCommands->commands, cmd);
     return 0;
 }
 
@@ -1971,8 +1971,8 @@ JobRun(GNode *targ)
      * and .INTERRUPT job in the parallel job module. This has
      * the nice side effect that it avoids a lot of other problems.
      */
-    Lst lst = Lst_Init(FALSE);
-    Lst_AtEnd(lst, targ);
+    Lst lst = Lst_Init();
+    Lst_AppendS(lst, targ);
     (void)Make_Run(lst);
     Lst_Destroy(lst, NULL);
     JobStart(targ, JOB_SPECIAL);
@@ -2458,7 +2458,7 @@ Job_ParseShell(char *line)
 	line++;
     }
 
-    free(UNCONST(shellArgv));
+    free(shellArgv);
 
     memset(&newShell, 0, sizeof(newShell));
 
@@ -2771,7 +2771,6 @@ Job_AbortAll(void)
 	continue;
 }
 
-
 /*-
  *-----------------------------------------------------------------------
  * JobRestartJobs --

@@ -1,4 +1,4 @@
-# $NetBSD: Makefile,v 1.104 2020/08/20 18:05:57 rillig Exp $
+# $NetBSD: Makefile,v 1.108 2020/08/22 15:25:50 sjg Exp $
 #
 # Unit tests for make(1)
 #
@@ -65,6 +65,7 @@ TESTS+=		dep
 TESTS+=		dep-colon
 TESTS+=		dep-double-colon
 TESTS+=		dep-exclam
+TESTS+=		dep-none
 TESTS+=		dep-wildcards
 TESTS+=		depsrc
 TESTS+=		depsrc-exec
@@ -83,6 +84,7 @@ TESTS+=		depsrc-recursive
 TESTS+=		depsrc-silent
 TESTS+=		depsrc-use
 TESTS+=		depsrc-usebefore
+TESTS+=		depsrc-usebefore-double-colon
 TESTS+=		depsrc-wait
 TESTS+=		deptgt
 TESTS+=		deptgt-begin
@@ -186,6 +188,7 @@ TESTS+=		# posix1	# broken by reverting POSIX changes
 TESTS+=		qequals
 TESTS+=		recursive
 TESTS+=		sh
+TESTS+=		sh-dots
 TESTS+=		sh-jobs
 TESTS+=		sh-jobs-error
 TESTS+=		sh-leading-at
@@ -320,6 +323,7 @@ FLAGS.vardebug=		-k -dv FROM_CMDLINE=
 FLAGS.varmod-match-escape= -dv
 
 # Some tests need extra post-processing.
+SED_CMDS.sh-dots+=	-e '/not found/s,^.*sh: ,,'
 SED_CMDS.varmod-subst-regex+= \
 			-e 's,\(Regex compilation error:\).*,\1 (details omitted),'
 SED_CMDS.varmod-edge+=	-e 's, line [0-9]*:, line omitted:,'
@@ -440,6 +444,7 @@ sync-mi:
 	@set -eu;							\
 	cd "${MAKEFILE:tA:H}/../../..";					\
 	mi="distrib/sets/lists/tests/mi";				\
+	cvs update "$$mi";						\
 	awk ${SYNC_MI_AWK:Q} < "$$mi" > "$$mi.$@";			\
 	mv -f "$$mi.$@" "$$mi";						\
 	cvs diff "$$mi" || true
