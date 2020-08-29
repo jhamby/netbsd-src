@@ -1,4 +1,4 @@
-/*	$NetBSD: str.c,v 1.60 2020/08/11 18:41:46 rillig Exp $	*/
+/*	$NetBSD: str.c,v 1.63 2020/08/29 07:52:55 rillig Exp $	*/
 
 /*-
  * Copyright (c) 1988, 1989, 1990, 1993
@@ -69,14 +69,14 @@
  */
 
 #ifndef MAKE_NATIVE
-static char rcsid[] = "$NetBSD: str.c,v 1.60 2020/08/11 18:41:46 rillig Exp $";
+static char rcsid[] = "$NetBSD: str.c,v 1.63 2020/08/29 07:52:55 rillig Exp $";
 #else
 #include <sys/cdefs.h>
 #ifndef lint
 #if 0
 static char     sccsid[] = "@(#)str.c	5.8 (Berkeley) 6/1/90";
 #else
-__RCSID("$NetBSD: str.c,v 1.60 2020/08/11 18:41:46 rillig Exp $");
+__RCSID("$NetBSD: str.c,v 1.63 2020/08/29 07:52:55 rillig Exp $");
 #endif
 #endif				/* not lint */
 #endif
@@ -142,14 +142,14 @@ str_concat4(const char *s1, const char *s2, const char *s3, const char *s4)
  *	Number of words in *out_words_len.
  */
 char **
-brk_string(const char *str, int *out_words_len, Boolean expand,
-	   char **out_words_buf)
+brk_string(const char *str, Boolean expand,
+	   size_t *out_words_len, char **out_words_buf)
 {
 	size_t str_len;
 	char *words_buf;
-	int words_cap;
+	size_t words_cap;
 	char **words;
-	int words_len;
+	size_t words_len;
 	char inquote;
 	char *word_start;
 	char *word_end;
@@ -282,7 +282,7 @@ brk_string(const char *str, int *out_words_len, Boolean expand,
 	}
 done:
 	words[words_len] = NULL;
-	*out_words_len = words_len;
+	*out_words_len = (int)words_len;
 	*out_words_buf = words_buf;
 	return words;
 }
@@ -383,7 +383,7 @@ Str_Match(const char *str, const char *pat)
 		 */
 		if (*pat == '[') {
 			Boolean neg = pat[1] == '^';
-			pat += 1 + neg;
+			pat += neg ? 2 : 1;
 
 			for (;;) {
 				if (*pat == ']' || *pat == 0) {

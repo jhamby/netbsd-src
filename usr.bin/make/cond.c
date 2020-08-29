@@ -1,4 +1,4 @@
-/*	$NetBSD: cond.c,v 1.98 2020/08/20 18:47:57 rillig Exp $	*/
+/*	$NetBSD: cond.c,v 1.106 2020/08/29 13:38:48 rillig Exp $	*/
 
 /*
  * Copyright (c) 1988, 1989, 1990 The Regents of the University of California.
@@ -70,14 +70,14 @@
  */
 
 #ifndef MAKE_NATIVE
-static char rcsid[] = "$NetBSD: cond.c,v 1.98 2020/08/20 18:47:57 rillig Exp $";
+static char rcsid[] = "$NetBSD: cond.c,v 1.106 2020/08/29 13:38:48 rillig Exp $";
 #else
 #include <sys/cdefs.h>
 #ifndef lint
 #if 0
 static char sccsid[] = "@(#)cond.c	8.2 (Berkeley) 1/2/94";
 #else
-__RCSID("$NetBSD: cond.c,v 1.98 2020/08/20 18:47:57 rillig Exp $");
+__RCSID("$NetBSD: cond.c,v 1.106 2020/08/29 13:38:48 rillig Exp $");
 #endif
 #endif /* not lint */
 #endif
@@ -91,14 +91,10 @@ __RCSID("$NetBSD: cond.c,v 1.98 2020/08/20 18:47:57 rillig Exp $");
  *
  */
 
-#include    <assert.h>
-#include    <ctype.h>
-#include    <errno.h>
+#include <errno.h>
 
-#include    "make.h"
-#include    "hash.h"
-#include    "dir.h"
-#include    "buf.h"
+#include "make.h"
+#include "dir.h"
 
 /*
  * The parsing of conditional expressions is based on this grammar:
@@ -276,19 +272,18 @@ CondDoDefined(int argLen MAKE_ATTR_UNUSED, const char *arg)
     return result;
 }
 
-/* Wrapper around Str_Match that returns 0 on match and non-zero
- * on mismatch. Callback function for CondDoMake via Lst_Find. */
-static int
+/* Wrapper around Str_Match, to be used by Lst_Find. */
+static Boolean
 CondFindStrMatch(const void *string, const void *pattern)
 {
-    return !Str_Match(string, pattern);
+    return Str_Match(string, pattern);
 }
 
 /* See if the given target is being made. */
 static Boolean
 CondDoMake(int argLen MAKE_ATTR_UNUSED, const char *arg)
 {
-    return Lst_Find(create, arg, CondFindStrMatch) != NULL;
+    return Lst_Find(create, CondFindStrMatch, arg) != NULL;
 }
 
 /* See if the given file exists. */
@@ -688,7 +683,7 @@ get_mpt_arg(Boolean doEval, const char **linePtr, char **argPtr,
      * TOK_TRUE if the resulting string is empty.
      */
     int length;
-    void *freeIt;
+    void *val_freeIt;
     const char *val;
     const char *cp = *linePtr;
 
@@ -696,7 +691,7 @@ get_mpt_arg(Boolean doEval, const char **linePtr, char **argPtr,
     *argPtr = NULL;
 
     val = Var_Parse(cp - 1, VAR_CMD, doEval ? VARE_WANTRES : 0, &length,
-		    &freeIt);
+		    &val_freeIt);
     /*
      * Advance *linePtr to beyond the closing ). Note that
      * we subtract one because 'length' is calculated from 'cp - 1'.
@@ -704,7 +699,7 @@ get_mpt_arg(Boolean doEval, const char **linePtr, char **argPtr,
     *linePtr = cp - 1 + length;
 
     if (val == var_Error) {
-	free(freeIt);
+	free(val_freeIt);
 	return -1;
     }
 
@@ -717,7 +712,7 @@ get_mpt_arg(Boolean doEval, const char **linePtr, char **argPtr,
      * true/false here.
      */
     length = *val ? 2 : 1;
-    free(freeIt);
+    free(val_freeIt);
     return length;
 }
 

@@ -1,4 +1,4 @@
-#	$NetBSD: t_misc.sh,v 1.1 2020/08/20 21:28:01 riastradh Exp $
+#	$NetBSD: t_misc.sh,v 1.4 2020/08/29 07:22:49 tih Exp $
 #
 # Copyright (c) 2018 Ryota Ozaki <ozaki.ryota@gmail.com>
 # All rights reserved.
@@ -34,7 +34,7 @@ atf_test_case wg_rekey cleanup
 wg_rekey_head()
 {
 
-	atf_set "descr" "tests of rekeying of WireGuard"
+	atf_set "descr" "tests of rekeying of wg(4)"
 	atf_set "require.progs" "rump_server" "wgconfig" "wg-keygen"
 }
 
@@ -54,10 +54,10 @@ wg_rekey_body()
 
 	export RUMP_SERVER=$SOCK_LOCAL
 	atf_check -s exit:0 -o ignore \
-	    rump.sysctl -w net.wireguard.rekey_after_time=$rekey_after_time
+	    rump.sysctl -w net.wg.rekey_after_time=$rekey_after_time
 	export RUMP_SERVER=$SOCK_PEER
 	atf_check -s exit:0 -o ignore \
-	    rump.sysctl -w net.wireguard.rekey_after_time=$rekey_after_time
+	    rump.sysctl -w net.wg.rekey_after_time=$rekey_after_time
 
 	# It sets key_priv_local key_pub_local key_priv_peer key_pub_peer
 	generate_keys
@@ -81,7 +81,7 @@ wg_rekey_body()
 	$ping $ip_wg_peer
 
 	latest_handshake=$($HIJACKING wgconfig wg0 show peer peer0 \
-	    | awk -F : '/latest-handshake/ {print $2;}')
+	    | awk -F ': ' '/latest-handshake/ {print $2;}')
 	$DEBUG && echo $latest_handshake
 
 	sleep 1
@@ -102,7 +102,7 @@ wg_rekey_body()
 	    $HIJACKING wgconfig wg0 show peer peer0
 
 	latest_handshake=$($HIJACKING wgconfig wg0 show peer peer0 \
-	    | awk -F : '/latest-handshake/ {print $2;}')
+	    | awk -F ': ' '/latest-handshake/ {print $2;}')
 	$DEBUG && echo $latest_handshake
 
 	# Wait for a reinitiation to be performed again
@@ -128,7 +128,7 @@ atf_test_case wg_handshake_timeout cleanup
 wg_handshake_timeout_head()
 {
 
-	atf_set "descr" "tests of handshake timeout of WireGuard"
+	atf_set "descr" "tests of handshake timeout of wg(4)"
 	atf_set "require.progs" "rump_server" "wgconfig" "wg-keygen"
 }
 
@@ -142,7 +142,6 @@ wg_handshake_timeout_body()
 	local ip_wg_peer=10.0.0.2
 	local port=51820
 	local rekey_after_time=3
-	local latest_handshake=
 	local outfile=./out
 	local rekey_timeout=3
 	local rekey_attempt_time=8
@@ -152,14 +151,14 @@ wg_handshake_timeout_body()
 
 	export RUMP_SERVER=$SOCK_LOCAL
 	atf_check -s exit:0 -o ignore \
-	    rump.sysctl -w net.wireguard.rekey_timeout=$rekey_timeout
+	    rump.sysctl -w net.wg.rekey_timeout=$rekey_timeout
 	atf_check -s exit:0 -o ignore \
-	    rump.sysctl -w net.wireguard.rekey_attempt_time=$rekey_attempt_time
+	    rump.sysctl -w net.wg.rekey_attempt_time=$rekey_attempt_time
 	export RUMP_SERVER=$SOCK_PEER
 	atf_check -s exit:0 -o ignore \
-	    rump.sysctl -w net.wireguard.rekey_timeout=$rekey_timeout
+	    rump.sysctl -w net.wg.rekey_timeout=$rekey_timeout
 	atf_check -s exit:0 -o ignore \
-	    rump.sysctl -w net.wireguard.rekey_attempt_time=$rekey_attempt_time
+	    rump.sysctl -w net.wg.rekey_attempt_time=$rekey_attempt_time
 
 	# It sets key_priv_local key_pub_local key_priv_peer key_pub_peer
 	generate_keys
@@ -220,7 +219,7 @@ atf_test_case wg_cookie cleanup
 wg_cookie_head()
 {
 
-	atf_set "descr" "tests of cookie messages of the WireGuard protocol"
+	atf_set "descr" "tests of cookie messages of the wg(4) protocol"
 	atf_set "require.progs" "rump_server" "wgconfig" "wg-keygen"
 }
 
@@ -259,7 +258,7 @@ wg_cookie_body()
 	export RUMP_SERVER=$SOCK_PEER
 	# Emulate load on the peer
 	atf_check -s exit:0 -o ignore \
-	    rump.sysctl -w net.wireguard.force_underload=1
+	    rump.sysctl -w net.wg.force_underload=1
 
 	export RUMP_SERVER=$SOCK_LOCAL
 
@@ -277,8 +276,8 @@ wg_cookie_body()
 	    -o match:"$ip_peer.$port > $ip_local.$port: UDP, length 64" \
 	    cat $outfile
 
-	$DEBUG && $HIJACKING wgconfig wg0 show
-	atf_check -s exit:0 -o match:"latest-handshake: 0" \
+	$DEBUG && $HIJACKING wgconfig wg0 show all
+	atf_check -s exit:0 -o match:"latest-handshake: \(never\)" \
 	    $HIJACKING wgconfig wg0
 
 	# Wait for restarting a session
@@ -288,8 +287,8 @@ wg_cookie_body()
 	# a valid cookie.
 	$ping $ip_wg_peer
 
-	$DEBUG && $HIJACKING wgconfig wg0 show
-	atf_check -s exit:0 -o not-match:"latest-handshake: 0" \
+	$DEBUG && $HIJACKING wgconfig wg0 show all
+	atf_check -s exit:0 -o not-match:"latest-handshake: \(never\)" \
 	    $HIJACKING wgconfig wg0
 
 	destroy_wg_interfaces
@@ -306,7 +305,7 @@ atf_test_case wg_mobility cleanup
 wg_mobility_head()
 {
 
-	atf_set "descr" "tests of the mobility of WireGuard"
+	atf_set "descr" "tests of the mobility of wg(4)"
 	atf_set "require.progs" "rump_server" "wgconfig" "wg-keygen"
 }
 
@@ -441,7 +440,7 @@ wg_keepalive_body()
 
 	# Shorten keepalive_timeout of the peer
 	atf_check -s exit:0 -o ignore \
-	    rump.sysctl -w net.wireguard.keepalive_timeout=$keepalive_timeout
+	    rump.sysctl -w net.wg.keepalive_timeout=$keepalive_timeout
 
 	export RUMP_SERVER=$SOCK_LOCAL
 
@@ -505,10 +504,10 @@ wg_psk_body()
 
 	export RUMP_SERVER=$SOCK_LOCAL
 	atf_check -s exit:0 -o ignore \
-	    rump.sysctl -w net.wireguard.rekey_after_time=$rekey_after_time
+	    rump.sysctl -w net.wg.rekey_after_time=$rekey_after_time
 	export RUMP_SERVER=$SOCK_PEER
 	atf_check -s exit:0 -o ignore \
-	    rump.sysctl -w net.wireguard.rekey_after_time=$rekey_after_time
+	    rump.sysctl -w net.wg.rekey_after_time=$rekey_after_time
 
 	# It sets key_priv_local key_pub_local key_priv_peer key_pub_peer
 	generate_keys
@@ -588,6 +587,78 @@ wg_psk_cleanup()
 	cleanup
 }
 
+atf_test_case wg_malformed cleanup
+wg_malformed_head()
+{
+
+	atf_set "descr" "tests malformed packet headers"
+	atf_set "require.progs" "nc" "rump_server" "wgconfig" "wg-keygen"
+	atf_set "timeout" "10"
+}
+
+wg_malformed_body()
+{
+	local ifconfig="atf_check -s exit:0 rump.ifconfig"
+	local ping="atf_check -s exit:0 -o ignore rump.ping -n -c 1 -w 1"
+	local ip_local=192.168.1.1
+	local ip_peer=192.168.1.2
+	local ip_wg_local=10.0.0.1
+	local ip_wg_peer=10.0.0.2
+	local port=51820
+	setup_servers
+
+	# It sets key_priv_local key_pub_local key_priv_peer key_pub_peer
+	generate_keys
+
+	export RUMP_SERVER=$SOCK_LOCAL
+	setup_common shmif0 inet $ip_local 24
+	setup_wg_common wg0 inet $ip_wg_local 24 $port "$key_priv_local"
+
+	export RUMP_SERVER=$SOCK_PEER
+	setup_common shmif0 inet $ip_peer 24
+	setup_wg_common wg0 inet $ip_wg_peer 24 $port "$key_priv_peer"
+
+	export RUMP_SERVER=$SOCK_LOCAL
+	add_peer wg0 peer0 $key_pub_peer $ip_peer:$port $ip_wg_peer/32
+
+	export RUMP_SERVER=$SOCK_PEER
+	add_peer wg0 peer0 $key_pub_local $ip_local:$port $ip_wg_local/32
+
+	export RUMP_SERVER=$SOCK_LOCAL
+
+	$ping $ip_wg_peer
+
+	printf 'send malformed packets\n'
+
+	$HIJACKING ping -c 1 -n $ip_peer
+
+	printf 'x' | $HIJACKING nc -Nu -w 0 $ip_peer $port
+	printf 'xy' | $HIJACKING nc -Nu -w 0 $ip_peer $port
+	printf 'xyz' | $HIJACKING nc -Nu -w 0 $ip_peer $port
+	printf 'xyzw' | $HIJACKING nc -Nu -w 0 $ip_peer $port
+	printf '\x00\x00\x00\x00' | $HIJACKING nc -Nu -w 0 $ip_peer $port
+	printf '\x00\x00\x00\x00z' | $HIJACKING nc -Nu -w 0 $ip_peer $port
+	printf '\x01\x00\x00\x00' | $HIJACKING nc -Nu -w 0 $ip_peer $port
+	printf '\x01\x00\x00\x00z' | $HIJACKING nc -Nu -w 0 $ip_peer $port
+	printf '\x02\x00\x00\x00' | $HIJACKING nc -Nu -w 0 $ip_peer $port
+	printf '\x02\x00\x00\x00z' | $HIJACKING nc -Nu -w 0 $ip_peer $port
+	printf '\x03\x00\x00\x00' | $HIJACKING nc -Nu -w 0 $ip_peer $port
+	printf '\x03\x00\x00\x00z' | $HIJACKING nc -Nu -w 0 $ip_peer $port
+	printf '\x04\x00\x00\x00' | $HIJACKING nc -Nu -w 0 $ip_peer $port
+	printf '\x04\x00\x00\x00z' | $HIJACKING nc -Nu -w 0 $ip_peer $port
+
+	printf 'done sending malformed packets\n'
+
+	$ping $ip_wg_peer
+}
+
+wg_malformed_cleanup()
+{
+
+	$DEBUG && dump
+	cleanup
+}
+
 atf_init_test_cases()
 {
 
@@ -597,4 +668,5 @@ atf_init_test_cases()
 	atf_add_test_case wg_mobility
 	atf_add_test_case wg_keepalive
 	atf_add_test_case wg_psk
+	atf_add_test_case wg_malformed
 }

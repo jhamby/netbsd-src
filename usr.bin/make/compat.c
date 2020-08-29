@@ -1,4 +1,4 @@
-/*	$NetBSD: compat.c,v 1.124 2020/08/22 15:43:32 rillig Exp $	*/
+/*	$NetBSD: compat.c,v 1.135 2020/08/29 14:47:26 rillig Exp $	*/
 
 /*
  * Copyright (c) 1988, 1989, 1990 The Regents of the University of California.
@@ -70,14 +70,14 @@
  */
 
 #ifndef MAKE_NATIVE
-static char rcsid[] = "$NetBSD: compat.c,v 1.124 2020/08/22 15:43:32 rillig Exp $";
+static char rcsid[] = "$NetBSD: compat.c,v 1.135 2020/08/29 14:47:26 rillig Exp $";
 #else
 #include <sys/cdefs.h>
 #ifndef lint
 #if 0
 static char sccsid[] = "@(#)compat.c	8.2 (Berkeley) 3/19/94";
 #else
-__RCSID("$NetBSD: compat.c,v 1.124 2020/08/22 15:43:32 rillig Exp $");
+__RCSID("$NetBSD: compat.c,v 1.135 2020/08/29 14:47:26 rillig Exp $");
 #endif
 #endif /* not lint */
 #endif
@@ -137,23 +137,13 @@ CompatDeleteTarget(GNode *gn)
     }
 }
 
-/*-
- *-----------------------------------------------------------------------
- * CompatInterrupt --
- *	Interrupt the creation of the current target and remove it if
- *	it ain't precious.
+/* Interrupt the creation of the current target and remove it if it ain't
+ * precious. Then exit.
  *
- * Results:
- *	None.
- *
- * Side Effects:
- *	The target is removed and the process exits. If .INTERRUPT exists,
- *	its commands are run first WITH INTERRUPTS IGNORED..
+ * If .INTERRUPT exists, its commands are run first WITH INTERRUPTS IGNORED.
  *
  * XXX: is .PRECIOUS supposed to inhibit .INTERRUPT? I doubt it, but I've
  * left the logic alone for now. - dholland 20160826
- *
- *-----------------------------------------------------------------------
  */
 static void
 CompatInterrupt(int signo)
@@ -221,18 +211,16 @@ CompatRunCommand(void *cmdp, void *gnp)
     LstNode 	  cmdNode;  	/* Node where current command is located */
     const char  ** volatile av;	/* Argument vector for thing to exec */
     char	** volatile mav;/* Copy of the argument vector for freeing */
-    int	    	  argc;	    	/* Number of arguments in av or 0 if not
-				 * dynamically allocated */
     Boolean 	  useShell;    	/* TRUE if command should be executed
 				 * using a shell */
     char	  * volatile cmd = (char *)cmdp;
     GNode	  *gn = (GNode *)gnp;
 
-    silent = gn->type & OP_SILENT;
+    silent = (gn->type & OP_SILENT) != 0;
     errCheck = !(gn->type & OP_IGNORE);
     doIt = FALSE;
 
-    cmdNode = Lst_MemberS(gn->commands, cmd);
+    cmdNode = Lst_Member(gn->commands, cmd);
     cmdStart = Var_Subst(cmd, gn, VARE_WANTRES);
 
     /*
@@ -247,10 +235,11 @@ CompatRunCommand(void *cmdp, void *gnp)
 	return 0;
     }
     cmd = cmdStart;
-    Lst_ReplaceS(cmdNode, cmdStart);
+    LstNode_Set(cmdNode, cmdStart);
 
     if ((gn->type & OP_SAVE_CMDS) && (gn != ENDNode)) {
-	Lst_AppendS(ENDNode->commands, cmdStart);
+        assert(ENDNode != NULL);
+	Lst_Append(ENDNode->commands, cmdStart);
 	return 0;
     }
     if (strcmp(cmdStart, "...") == 0) {
@@ -261,7 +250,7 @@ CompatRunCommand(void *cmdp, void *gnp)
     while ((*cmd == '@') || (*cmd == '-') || (*cmd == '+')) {
 	switch (*cmd) {
 	case '@':
-	    silent = DEBUG(LOUD) ? FALSE : TRUE;
+	    silent = !DEBUG(LOUD);
 	    break;
 	case '-':
 	    errCheck = FALSE;
@@ -349,15 +338,15 @@ again:
 	shargv[shargc++] = cmd;
 	shargv[shargc++] = NULL;
 	av = shargv;
-	argc = 0;
 	bp = NULL;
 	mav = NULL;
     } else {
+        size_t argc;
 	/*
 	 * No meta-characters, so no need to exec a shell. Break the command
 	 * into words to form an argument vector we can execute.
 	 */
-	mav = brk_string(cmd, &argc, TRUE, &bp);
+	mav = brk_string(cmd, TRUE, &argc, &bp);
 	if (mav == NULL) {
 		useShell = 1;
 		goto again;
@@ -393,7 +382,9 @@ again:
     free(mav);
     free(bp);
 
-    Lst_ReplaceS(cmdNode, NULL);
+    /* XXX: Memory management looks suspicious here. */
+    /* XXX: Setting a list item to NULL is unexpected. */
+    LstNode_SetNull(cmdNode);
 
 #ifdef USE_META
     if (useMeta) {
@@ -534,11 +525,11 @@ Compat_Make(void *gnp, void *pgnp)
 	Lst_ForEach(gn->children, Compat_Make, gn);
 	if ((gn->flags & REMAKE) == 0) {
 	    gn->made = ABORTED;
-	    pgn->flags &= ~REMAKE;
+	    pgn->flags &= ~(unsigned)REMAKE;
 	    goto cohorts;
 	}
 
-	if (Lst_MemberS(gn->iParents, pgn) != NULL) {
+	if (Lst_Member(gn->iParents, pgn) != NULL) {
 	    char *p1;
 	    Var_Set(IMPSRC, Var_Value(TARGET, gn, &p1), pgn);
 	    bmake_free(p1);
@@ -604,7 +595,7 @@ Compat_Make(void *gnp, void *pgnp)
 		Lst_ForEach(gn->commands, CompatRunCommand, gn);
 		curTarg = NULL;
 	    } else {
-		Job_Touch(gn, gn->type & OP_SILENT);
+		Job_Touch(gn, (gn->type & OP_SILENT) != 0);
 	    }
 	} else {
 	    gn->made = ERROR;
@@ -630,7 +621,7 @@ Compat_Make(void *gnp, void *pgnp)
 		Make_TimeStamp(pgn, gn);
 	    }
 	} else if (keepgoing) {
-	    pgn->flags &= ~REMAKE;
+	    pgn->flags &= ~(unsigned)REMAKE;
 	} else {
 	    PrintOnError(gn, "\nStop.");
 	    exit(1);
@@ -640,18 +631,19 @@ Compat_Make(void *gnp, void *pgnp)
 	 * Already had an error when making this beastie. Tell the parent
 	 * to abort.
 	 */
-	pgn->flags &= ~REMAKE;
+	pgn->flags &= ~(unsigned)REMAKE;
     } else {
-	if (Lst_MemberS(gn->iParents, pgn) != NULL) {
+	if (Lst_Member(gn->iParents, pgn) != NULL) {
 	    char *p1;
-	    Var_Set(IMPSRC, Var_Value(TARGET, gn, &p1), pgn);
+	    const char *target = Var_Value(TARGET, gn, &p1);
+	    Var_Set(IMPSRC, target != NULL ? target : "", pgn);
 	    bmake_free(p1);
 	}
 	switch(gn->made) {
 	    case BEINGMADE:
 		Error("Graph cycles through %s", gn->name);
 		gn->made = ERROR;
-		pgn->flags &= ~REMAKE;
+		pgn->flags &= ~(unsigned)REMAKE;
 		break;
 	    case MADE:
 		if ((gn->type & OP_EXEC) == 0) {
@@ -674,21 +666,10 @@ cohorts:
     return 0;
 }
 
-/*-
- *-----------------------------------------------------------------------
- * Compat_Run --
- *	Initialize this mode and start making.
+/* Initialize this module and start making.
  *
  * Input:
- *	targs		List of target nodes to re-create
- *
- * Results:
- *	None.
- *
- * Side Effects:
- *	Guess what?
- *
- *-----------------------------------------------------------------------
+ *	targs		The target nodes to re-create
  */
 void
 Compat_Run(Lst targs)
@@ -747,7 +728,7 @@ Compat_Run(Lst targs)
      */
     errors = 0;
     while (!Lst_IsEmpty(targs)) {
-	gn = Lst_DequeueS(targs);
+	gn = Lst_Dequeue(targs);
 	Compat_Make(gn, gn);
 
 	if (gn->made == UPTODATE) {

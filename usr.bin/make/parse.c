@@ -1,4 +1,4 @@
-/*	$NetBSD: parse.c,v 1.257 2020/08/22 15:17:09 rillig Exp $	*/
+/*	$NetBSD: parse.c,v 1.273 2020/08/29 13:38:48 rillig Exp $	*/
 
 /*
  * Copyright (c) 1988, 1989, 1990, 1993
@@ -69,14 +69,14 @@
  */
 
 #ifndef MAKE_NATIVE
-static char rcsid[] = "$NetBSD: parse.c,v 1.257 2020/08/22 15:17:09 rillig Exp $";
+static char rcsid[] = "$NetBSD: parse.c,v 1.273 2020/08/29 13:38:48 rillig Exp $";
 #else
 #include <sys/cdefs.h>
 #ifndef lint
 #if 0
 static char sccsid[] = "@(#)parse.c	8.3 (Berkeley) 3/19/94";
 #else
-__RCSID("$NetBSD: parse.c,v 1.257 2020/08/22 15:17:09 rillig Exp $");
+__RCSID("$NetBSD: parse.c,v 1.273 2020/08/29 13:38:48 rillig Exp $");
 #endif
 #endif /* not lint */
 #endif
@@ -126,8 +126,6 @@ __RCSID("$NetBSD: parse.c,v 1.257 2020/08/22 15:17:09 rillig Exp $");
 #include <sys/types.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
-#include <assert.h>
-#include <ctype.h>
 #include <errno.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -427,17 +425,17 @@ loadedfile_nextbuf(void *x, size_t *len)
 /*
  * Try to get the size of a file.
  */
-static ReturnStatus
+static Boolean
 load_getsize(int fd, size_t *ret)
 {
 	struct stat st;
 
 	if (fstat(fd, &st) < 0) {
-		return FAILURE;
+		return FALSE;
 	}
 
 	if (!S_ISREG(st.st_mode)) {
-		return FAILURE;
+		return FALSE;
 	}
 
 	/*
@@ -450,11 +448,11 @@ load_getsize(int fd, size_t *ret)
 	 * While we're at it reject negative sizes too, just in case.
 	 */
 	if (st.st_size < 0 || st.st_size > 0x7fffffff) {
-		return FAILURE;
+		return FALSE;
 	}
 
 	*ret = (size_t) st.st_size;
-	return SUCCESS;
+	return TRUE;
 }
 
 /*
@@ -491,7 +489,7 @@ loadfile(const char *path, int fd)
 #endif
 	}
 
-	if (load_getsize(fd, &lf->len) == SUCCESS) {
+	if (load_getsize(fd, &lf->len)) {
 		/* found a size, try mmap */
 		if (pagesize == 0)
 			pagesize = sysconf(_SC_PAGESIZE);
@@ -855,10 +853,10 @@ ParseLinkSrc(void *pgnp, void *cgnp)
     GNode          *cgn = (GNode *)cgnp;
 
     if ((pgn->type & OP_DOUBLEDEP) && !Lst_IsEmpty(pgn->cohorts))
-	pgn = Lst_DatumS(Lst_Last(pgn->cohorts));
-    Lst_AppendS(pgn->children, cgn);
+	pgn = Lst_Datum(Lst_Last(pgn->cohorts));
+    Lst_Append(pgn->children, cgn);
     if (specType == Not)
-	Lst_AppendS(cgn->parents, pgn);
+	Lst_Append(cgn->parents, pgn);
     pgn->unmade += 1;
     if (DEBUG(PARSE)) {
 	fprintf(debug_file, "# %s: added child %s - %s\n", __func__,
@@ -934,7 +932,7 @@ ParseDoOp(void *gnp, void *opp)
 	 * traversals will no longer see this node anyway. -mycroft)
 	 */
 	cohort->type = op | OP_INVISIBLE;
-	Lst_AppendS(gn->cohorts, cohort);
+	Lst_Append(gn->cohorts, cohort);
 	cohort->centurion = gn;
 	gn->unmade_cohorts += 1;
 	snprintf(cohort->cohort_num, sizeof cohort->cohort_num, "#%d",
@@ -983,7 +981,8 @@ ParseDoSrc(int tOp, const char *src)
 	if (keywd != -1) {
 	    int op = parseKeywords[keywd].op;
 	    if (op != 0) {
-		Lst_ForEach(targets, ParseDoOp, &op);
+		if (targets != NULL)
+		    Lst_ForEach(targets, ParseDoOp, &op);
 		return;
 	    }
 	    if (parseKeywords[keywd].spec == Wait) {
@@ -1001,7 +1000,8 @@ ParseDoSrc(int tOp, const char *src)
 		if (doing_depend)
 		    ParseMark(gn);
 		gn->type = OP_WAIT | OP_PHONY | OP_DEPENDS | OP_NOTMAIN;
-		Lst_ForEach(targets, ParseLinkSrc, gn);
+		if (targets != NULL)
+		    Lst_ForEach(targets, ParseLinkSrc, gn);
 		return;
 	    }
 	}
@@ -1017,7 +1017,7 @@ ParseDoSrc(int tOp, const char *src)
 	 * invoked if the user didn't specify a target on the command
 	 * line. This is to allow #ifmake's to succeed, or something...
 	 */
-	Lst_AppendS(create, bmake_strdup(src));
+	Lst_Append(create, bmake_strdup(src));
 	/*
 	 * Add the name to the .TARGETS variable as well, so the user can
 	 * employ that, if desired.
@@ -1034,8 +1034,8 @@ ParseDoSrc(int tOp, const char *src)
 	if (doing_depend)
 	    ParseMark(gn);
 	if (predecessor != NULL) {
-	    Lst_AppendS(predecessor->order_succ, gn);
-	    Lst_AppendS(gn->order_pred, predecessor);
+	    Lst_Append(predecessor->order_succ, gn);
+	    Lst_Append(gn->order_pred, predecessor);
 	    if (DEBUG(PARSE)) {
 		fprintf(debug_file, "# %s: added Order dependency %s - %s\n",
 		    __func__, predecessor->name, gn->name);
@@ -1069,7 +1069,8 @@ ParseDoSrc(int tOp, const char *src)
 	if (tOp) {
 	    gn->type |= tOp;
 	} else {
-	    Lst_ForEach(targets, ParseLinkSrc, gn);
+	    if (targets != NULL)
+		Lst_ForEach(targets, ParseLinkSrc, gn);
 	}
 	break;
     }
@@ -1237,7 +1238,7 @@ ParseDoDependency(char *line)
 		(void)Var_Parse(cp, VAR_CMD, VARE_UNDEFERR|VARE_WANTRES,
 				&length, &freeIt);
 		free(freeIt);
-		cp += length-1;
+		cp += length - 1;
 	    }
 	}
 
@@ -1252,11 +1253,11 @@ ParseDoDependency(char *line)
 	     * things like "archive(file1.o file2.o file3.o)" are permissible.
 	     * Arch_ParseArchive will set 'line' to be the first non-blank
 	     * after the archive-spec. It creates/finds nodes for the members
-	     * and places them on the given list, returning SUCCESS if all
-	     * went well and FAILURE if there was an error in the
+	     * and places them on the given list, returning TRUE if all
+	     * went well and FALSE if there was an error in the
 	     * specification. On error, line should remain untouched.
 	     */
-	    if (Arch_ParseArchive(&line, targets, VAR_CMD) != SUCCESS) {
+	    if (!Arch_ParseArchive(&line, targets, VAR_CMD)) {
 		Parse_Error(PARSE_FATAL,
 			     "Error in archive specification: \"%s\"", line);
 		goto out;
@@ -1356,7 +1357,7 @@ ParseDoDependency(char *line)
 		    if (paths == NULL) {
 			paths = Lst_Init();
 		    }
-		    Lst_AppendS(paths, dirSearchPath);
+		    Lst_Append(paths, dirSearchPath);
 		    break;
 		case Main:
 		    if (!Lst_IsEmpty(create)) {
@@ -1372,12 +1373,12 @@ ParseDoDependency(char *line)
 		    if (doing_depend)
 			ParseMark(gn);
 		    gn->type |= OP_NOTMAIN|OP_SPECIAL;
-		    Lst_AppendS(targets, gn);
+		    Lst_Append(targets, gn);
 		    break;
 		case Default:
 		    gn = Targ_NewGN(".DEFAULT");
 		    gn->type |= (OP_NOTMAIN|OP_TRANSFORM);
-		    Lst_AppendS(targets, gn);
+		    Lst_Append(targets, gn);
 		    DEFAULT = gn;
 		    break;
 		case DeleteOnError:
@@ -1414,7 +1415,7 @@ ParseDoDependency(char *line)
 		    if (paths == NULL) {
 			paths = Lst_Init();
 		    }
-		    Lst_AppendS(paths, path);
+		    Lst_Append(paths, path);
 		}
 	    }
 	}
@@ -1441,13 +1442,13 @@ ParseDoDependency(char *line)
 		 * No wildcards, but we want to avoid code duplication,
 		 * so create a list with the word on it.
 		 */
-		Lst_AppendS(curTargs, line);
+		Lst_Append(curTargs, line);
 	    }
 
 	    /* Apply the targets. */
 
 	    while(!Lst_IsEmpty(curTargs)) {
-		char *targName = Lst_DequeueS(curTargs);
+		char *targName = Lst_Dequeue(curTargs);
 
 		if (!Suff_IsTransform (targName)) {
 		    gn = Targ_FindNode(targName, TARG_CREATE);
@@ -1457,7 +1458,7 @@ ParseDoDependency(char *line)
 		if (doing_depend)
 		    ParseMark(gn);
 
-		Lst_AppendS(targets, gn);
+		Lst_Append(targets, gn);
 	    }
 	} else if (specType == ExPath && *line != '.' && *line != '\0') {
 	    Parse_Error(PARSE_WARNING, "Extra target (%s) ignored", line);
@@ -1496,10 +1497,10 @@ ParseDoDependency(char *line)
     /*
      * Don't need the list of target names anymore...
      */
-    Lst_Destroy(curTargs, NULL);
+    Lst_Free(curTargs);
     curTargs = NULL;
 
-    if (!Lst_IsEmpty(targets)) {
+    if (targets != NULL && !Lst_IsEmpty(targets)) {
 	switch(specType) {
 	    default:
 		Parse_Error(PARSE_WARNING, "Special and mundane targets don't mix. Mundane ones ignored");
@@ -1549,7 +1550,8 @@ ParseDoDependency(char *line)
      * operator a target was defined with. It fails if the operator
      * used isn't consistent across all references.
      */
-    Lst_ForEach(targets, ParseDoOp, &op);
+    if (targets != NULL)
+	Lst_ForEach(targets, ParseDoOp, &op);
 
     /*
      * Onward to the sources.
@@ -1586,7 +1588,8 @@ ParseDoDependency(char *line)
 		beSilent = TRUE;
 		break;
 	    case ExPath:
-		Lst_ForEach(paths, ParseClearPath, NULL);
+		if (paths != NULL)
+		    Lst_ForEach(paths, ParseClearPath, NULL);
 		Dir_SetPATH();
 		break;
 #ifdef POSIX
@@ -1606,7 +1609,7 @@ ParseDoDependency(char *line)
 	Main_ParseArgLine(line);
 	*line = '\0';
     } else if (specType == ExShell) {
-	if (Job_ParseShell(line) != SUCCESS) {
+	if (!Job_ParseShell(line)) {
 	    Parse_Error(PARSE_FATAL, "improper shell specification");
 	    goto out;
 	}
@@ -1661,7 +1664,8 @@ ParseDoDependency(char *line)
 		    Suff_AddSuffix(line, &mainNode);
 		    break;
 		case ExPath:
-		    Lst_ForEach(paths, ParseAddDir, line);
+		    if (paths != NULL)
+			Lst_ForEach(paths, ParseAddDir, line);
 		    break;
 		case Includes:
 		    Suff_AddInclude(line);
@@ -1688,7 +1692,7 @@ ParseDoDependency(char *line)
 	    line = cp;
 	}
 	if (paths) {
-	    Lst_Destroy(paths, NULL);
+	    Lst_Free(paths);
 	    paths = NULL;
 	}
 	if (specType == ExPath)
@@ -1715,17 +1719,17 @@ ParseDoDependency(char *line)
 
 	    if (*cp == LPAREN) {
 		sources = Lst_Init();
-		if (Arch_ParseArchive(&line, sources, VAR_CMD) != SUCCESS) {
+		if (!Arch_ParseArchive(&line, sources, VAR_CMD)) {
 		    Parse_Error(PARSE_FATAL,
 				 "Error in source archive spec \"%s\"", line);
 		    goto out;
 		}
 
 		while (!Lst_IsEmpty(sources)) {
-		    gn = Lst_DequeueS(sources);
+		    gn = Lst_Dequeue(sources);
 		    ParseDoSrc(tOp, gn->name);
 		}
-		Lst_Destroy(sources, NULL);
+		Lst_Free(sources);
 		cp = line;
 	    } else {
 		if (*cp) {
@@ -1742,7 +1746,7 @@ ParseDoDependency(char *line)
 	}
     }
 
-    if (mainNode == NULL) {
+    if (mainNode == NULL && targets != NULL) {
 	/*
 	 * If we have yet to decide on a main target to make, in the
 	 * absence of any user input, we want the first target on
@@ -1753,10 +1757,10 @@ ParseDoDependency(char *line)
     }
 
 out:
-    if (paths)
-	Lst_Destroy(paths, NULL);
-    if (curTargs)
-	    Lst_Destroy(curTargs, NULL);
+    if (paths != NULL)
+	Lst_Free(paths);
+    if (curTargs != NULL)
+	Lst_Free(curTargs);
 }
 
 /*-
@@ -1876,7 +1880,7 @@ Parse_DoVar(char *line, GNode *ctxt)
      * XXX Rather than counting () and {} we should look for $ and
      * then expand the variable.
      */
-    for (depth = 0, cp = line + 1; depth > 0 || *cp != '='; cp++) {
+    for (depth = 0, cp = line; depth > 0 || *cp != '='; cp++) {
 	if (*cp == '(' || *cp == '{') {
 	    depth++;
 	    continue;
@@ -2084,18 +2088,18 @@ ParseAddCmd(void *gnp, void *cmd)
 
     /* Add to last (ie current) cohort for :: targets */
     if ((gn->type & OP_DOUBLEDEP) && !Lst_IsEmpty(gn->cohorts))
-	gn = Lst_DatumS(Lst_Last(gn->cohorts));
+	gn = Lst_Datum(Lst_Last(gn->cohorts));
 
     /* if target already supplied, ignore commands */
     if (!(gn->type & OP_HAS_COMMANDS)) {
-	Lst_AppendS(gn->commands, cmd);
+	Lst_Append(gn->commands, cmd);
 	if (ParseMaybeSubMake(cmd))
 	    gn->type |= OP_SUBMAKE;
 	ParseMark(gn);
     } else {
 #ifdef notyet
 	/* XXX: We cannot do this until we fix the tree */
-	Lst_AppendS(gn->commands, cmd);
+	Lst_Append(gn->commands, cmd);
 	Parse_Error(PARSE_WARNING,
 		     "overriding commands for target \"%s\"; "
 		     "previous commands defined at %s: %d ignored",
@@ -2391,18 +2395,14 @@ ParseSetParseFile(const char *filename)
 {
     char *slash, *dirname;
     const char *pd, *pf;
-    int len;
 
     slash = strrchr(filename, '/');
     if (slash == NULL) {
 	Var_Set(".PARSEDIR", pd = curdir, VAR_GLOBAL);
 	Var_Set(".PARSEFILE", pf = filename, VAR_GLOBAL);
-	dirname= NULL;
+	dirname = NULL;
     } else {
-	len = slash - filename;
-	dirname = bmake_malloc(len + 1);
-	memcpy(dirname, filename, len);
-	dirname[len] = '\0';
+	dirname = bmake_strsedup(filename, slash);
 	Var_Set(".PARSEDIR", pd = dirname, VAR_GLOBAL);
 	Var_Set(".PARSEFILE", pf = slash + 1, VAR_GLOBAL);
     }
@@ -2479,7 +2479,7 @@ Parse_SetInput(const char *name, int line, int fd,
 
     if (curFile != NULL)
 	/* Save exiting file info */
-	Lst_PrependS(includes, curFile);
+	Lst_Prepend(includes, curFile);
 
     /* Allocate and fill in new structure */
     curFile = bmake_malloc(sizeof *curFile);
@@ -2537,7 +2537,7 @@ IsInclude(const char *line, Boolean sysv)
 	static const size_t inclen = sizeof(inc) - 1;
 
 	/* 'd' is not valid for sysv */
-	int o = strchr(&("ds-"[sysv]), *line) != NULL;
+	int o = strchr(sysv ? "s-" : "ds-", *line) != NULL;
 
 	if (strncmp(line + o, inc, inclen) != 0)
 		return FALSE;
@@ -2746,7 +2746,7 @@ ParseEOF(void)
     free(curFile);
 
     if (Lst_IsEmpty(includes)) {
-        curFile = NULL;
+	curFile = NULL;
 	/* We've run out of input */
 	Var_Delete(".PARSEDIR", VAR_GLOBAL);
 	Var_Delete(".PARSEFILE", VAR_GLOBAL);
@@ -2755,7 +2755,7 @@ ParseEOF(void)
 	return DONE;
     }
 
-    curFile = Lst_DequeueS(includes);
+    curFile = Lst_Dequeue(includes);
     if (DEBUG(PARSE))
 	fprintf(debug_file, "ParseEOF: returning to file %s, line %d\n",
 	    curFile->fname, curFile->lineno);
@@ -3020,8 +3020,10 @@ static void
 ParseFinishLine(void)
 {
     if (inLine) {
-	Lst_ForEach(targets, Suff_EndTransform, NULL);
-	Lst_Destroy(targets, ParseHasCommands);
+        if (targets != NULL) {
+	    Lst_ForEach(targets, Suff_EndTransform, NULL);
+	    Lst_Destroy(targets, ParseHasCommands);
+	}
 	targets = NULL;
 	inLine = FALSE;
     }
@@ -3135,7 +3137,7 @@ Parse_File(const char *name, int fd)
 			cp = bmake_strdup(cp);
 			Lst_ForEach(targets, ParseAddCmd, cp);
 #ifdef CLEANUP
-			Lst_AppendS(targCmds, cp);
+			Lst_Append(targCmds, cp);
 #endif
 		    }
 		}
@@ -3239,8 +3241,8 @@ Parse_File(const char *name, int fd)
 	    /*
 	     * Need a non-circular list for the target nodes
 	     */
-	    if (targets)
-		Lst_Destroy(targets, NULL);
+	    if (targets != NULL)
+		Lst_Free(targets);
 
 	    targets = Lst_Init();
 	    inLine = TRUE;
@@ -3297,13 +3299,13 @@ void
 Parse_End(void)
 {
 #ifdef CLEANUP
-    Lst_Destroy(targCmds, (FreeProc *)free);
+    Lst_Destroy(targCmds, free);
     if (targets)
-	Lst_Destroy(targets, NULL);
+	Lst_Free(targets);
     Lst_Destroy(defIncPath, Dir_Destroy);
     Lst_Destroy(sysIncPath, Dir_Destroy);
     Lst_Destroy(parseIncPath, Dir_Destroy);
-    Lst_Destroy(includes, NULL);	/* Should be empty now */
+    Lst_Free(includes);	/* Should be empty now */
 #endif
 }
 
@@ -3333,11 +3335,11 @@ Parse_MainName(void)
 	Punt("no target to make.");
 	/*NOTREACHED*/
     } else if (mainNode->type & OP_DOUBLEDEP) {
-	Lst_AppendS(mainList, mainNode);
-	Lst_Concat(mainList, mainNode->cohorts, LST_CONCNEW);
+	Lst_Append(mainList, mainNode);
+	Lst_AppendAll(mainList, mainNode->cohorts);
     }
     else
-	Lst_AppendS(mainList, mainNode);
+	Lst_Append(mainList, mainNode);
     Var_Append(".TARGETS", mainNode->name, VAR_GLOBAL);
     return mainList;
 }

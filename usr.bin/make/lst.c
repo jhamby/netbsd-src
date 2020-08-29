@@ -1,4 +1,4 @@
-/* $NetBSD: lst.c,v 1.30 2020/08/22 16:00:52 skrll Exp $ */
+/* $NetBSD: lst.c,v 1.56 2020/08/29 10:41:12 rillig Exp $ */
 
 /*
  * Copyright (c) 1988, 1989, 1990, 1993
@@ -32,17 +32,16 @@
  * SUCH DAMAGE.
  */
 
-#include <assert.h>
 #include <stdint.h>
 
 #include "make.h"
 
 #ifndef MAKE_NATIVE
-static char rcsid[] = "$NetBSD: lst.c,v 1.30 2020/08/22 16:00:52 skrll Exp $";
+static char rcsid[] = "$NetBSD: lst.c,v 1.56 2020/08/29 10:41:12 rillig Exp $";
 #else
 #include <sys/cdefs.h>
 #ifndef lint
-__RCSID("$NetBSD: lst.c,v 1.30 2020/08/22 16:00:52 skrll Exp $");
+__RCSID("$NetBSD: lst.c,v 1.56 2020/08/29 10:41:12 rillig Exp $");
 #endif /* not lint */
 #endif
 
@@ -53,7 +52,11 @@ struct ListNode {
 				 * node may not be deleted until count
 				 * goes to 0 */
     Boolean deleted;		/* List node should be removed when done */
-    void *datum;		/* datum associated with this element */
+    union {
+	void *datum;		/* datum associated with this element */
+	const GNode *gnode;	/* alias, just for debugging */
+	const char *str;	/* alias, just for debugging */
+    };
 };
 
 typedef enum {
@@ -71,20 +74,6 @@ struct List {
 				 * *just* opened */
     LstNode prev;		/* Previous node, if open. Used by Lst_Remove */
 };
-
-static ReturnStatus Lst_AtEnd(Lst, void *);
-
-static Boolean
-LstIsValid(Lst list)
-{
-    return list != NULL;
-}
-
-static Boolean
-LstNodeIsValid(LstNode node)
-{
-    return node != NULL;
-}
 
 /* Allocate and initialize a list node.
  *
@@ -122,66 +111,57 @@ Lst_Init(void)
 
 /* Duplicate an entire list, usually by copying the datum pointers.
  * If copyProc is given, that function is used to create the new datum from the
- * old datum, usually by creating a copy of it.
- * Return the new list, or NULL on failure. */
+ * old datum, usually by creating a copy of it. */
 Lst
-Lst_Duplicate(Lst list, DuplicateProc *copyProc)
+Lst_Copy(Lst list, LstCopyProc copyProc)
 {
     Lst newList;
     LstNode node;
 
-    if (!LstIsValid(list)) {
-	return NULL;
-    }
+    assert(list != NULL);
 
     newList = Lst_Init();
 
-    node = list->first;
-    while (node != NULL) {
-	if (copyProc != NULL) {
-	    if (Lst_AtEnd(newList, copyProc(node->datum)) == FAILURE) {
-		return NULL;
-	    }
-	} else if (Lst_AtEnd(newList, node->datum) == FAILURE) {
-	    return NULL;
-	}
-
-	node = node->next;
+    for (node = list->first; node != NULL; node = node->next) {
+	void *datum = copyProc != NULL ? copyProc(node->datum) : node->datum;
+	Lst_Append(newList, datum);
     }
 
     return newList;
 }
 
+/* Free a list and all its nodes. The list data itself are not freed though. */
+void
+Lst_Free(Lst list)
+{
+    LstNode node;
+    LstNode next;
+
+    assert(list != NULL);
+
+    for (node = list->first; node != NULL; node = next) {
+	next = node->next;
+	free(node);
+    }
+
+    free(list);
+}
+
 /* Destroy a list and free all its resources. If the freeProc is given, it is
  * called with the datum from each node in turn before the node is freed. */
 void
-Lst_Destroy(Lst list, FreeProc *freeProc)
+Lst_Destroy(Lst list, LstFreeProc freeProc)
 {
     LstNode node;
-    LstNode next = NULL;
+    LstNode next;
 
-    if (list == NULL)
-	return;
+    assert(list != NULL);
+    assert(freeProc != NULL);
 
-    /* To ease scanning */
-    if (list->last != NULL)
-	list->last->next = NULL;
-    else {
-	free(list);
-	return;
-    }
-
-    if (freeProc) {
-	for (node = list->first; node != NULL; node = next) {
-	    next = node->next;
-	    freeProc(node->datum);
-	    free(node);
-	}
-    } else {
-	for (node = list->first; node != NULL; node = next) {
-	    next = node->next;
-	    free(node);
-	}
+    for (node = list->first; node != NULL; node = next) {
+	next = node->next;
+	freeProc(node->datum);
+	free(node);
     }
 
     free(list);
@@ -193,54 +173,14 @@ Lst_Destroy(Lst list, FreeProc *freeProc)
 
 /* Insert a new node with the given piece of data before the given node in the
  * given list. */
-static ReturnStatus
-LstInsertBefore(Lst list, LstNode node, void *datum)
-{
-    LstNode newNode;
-
-    /*
-     * check validity of arguments
-     */
-    if (LstIsValid(list) && (LstIsEmpty(list) && node == NULL))
-	goto ok;
-
-    if (!LstIsValid(list) || LstIsEmpty(list) || !LstNodeIsValid(node)) {
-	return FAILURE;
-    }
-
-    ok:
-    newNode = LstNodeNew(datum);
-
-    if (node == NULL) {
-	newNode->prev = newNode->next = NULL;
-	list->first = list->last = newNode;
-    } else {
-	newNode->prev = node->prev;
-	newNode->next = node;
-
-	if (newNode->prev != NULL) {
-	    newNode->prev->next = newNode;
-	}
-	node->prev = newNode;
-
-	if (node == list->first) {
-	    list->first = newNode;
-	}
-    }
-
-    return SUCCESS;
-}
-
-/* Insert a new node with the given piece of data before the given node in the
- * given list. */
 void
-Lst_InsertBeforeS(Lst list, LstNode node, void *datum)
+Lst_InsertBefore(Lst list, LstNode node, void *datum)
 {
     LstNode newNode;
 
-    assert(LstIsValid(list));
+    assert(list != NULL);
     assert(!LstIsEmpty(list));
-    assert(LstNodeIsValid(node));
+    assert(node != NULL);
     assert(datum != NULL);
 
     newNode = LstNodeNew(datum);
@@ -257,67 +197,13 @@ Lst_InsertBeforeS(Lst list, LstNode node, void *datum)
     }
 }
 
-/* Insert a new node with the given piece of data after the given node in the
- * given list. */
-static ReturnStatus
-LstInsertAfter(Lst list, LstNode node, void *datum)
-{
-    LstNode newNode;
-
-    if (LstIsValid(list) && (node == NULL && LstIsEmpty(list))) {
-	goto ok;
-    }
-
-    if (!LstIsValid(list) || LstIsEmpty(list) || !LstNodeIsValid(node)) {
-	return FAILURE;
-    }
-    ok:
-
-    newNode = LstNodeNew(datum);
-
-    if (node == NULL) {
-	newNode->next = newNode->prev = NULL;
-	list->first = list->last = newNode;
-    } else {
-	newNode->prev = node;
-	newNode->next = node->next;
-
-	node->next = newNode;
-	if (newNode->next != NULL) {
-	    newNode->next->prev = newNode;
-	}
-
-	if (node == list->last) {
-	    list->last = newNode;
-	}
-    }
-
-    return SUCCESS;
-}
-
-/* Add a piece of data at the front of the given list. */
-ReturnStatus
-Lst_AtFront(Lst list, void *datum)
-{
-    LstNode front = Lst_First(list);
-    return LstInsertBefore(list, front, datum);
-}
-
-/* Add a piece of data at the end of the given list. */
-ReturnStatus
-Lst_AtEnd(Lst list, void *datum)
-{
-    LstNode end = Lst_Last(list);
-    return LstInsertAfter(list, end, datum);
-}
-
 /* Add a piece of data at the start of the given list. */
 void
-Lst_PrependS(Lst list, void *datum)
+Lst_Prepend(Lst list, void *datum)
 {
     LstNode node;
 
-    assert(LstIsValid(list));
+    assert(list != NULL);
     assert(datum != NULL);
 
     node = LstNodeNew(datum);
@@ -335,11 +221,11 @@ Lst_PrependS(Lst list, void *datum)
 
 /* Add a piece of data at the end of the given list. */
 void
-Lst_AppendS(Lst list, void *datum)
+Lst_Append(Lst list, void *datum)
 {
     LstNode node;
 
-    assert(LstIsValid(list));
+    assert(list != NULL);
     assert(datum != NULL);
 
     node = LstNodeNew(datum);
@@ -358,10 +244,10 @@ Lst_AppendS(Lst list, void *datum)
 /* Remove the given node from the given list.
  * The datum stored in the node must be freed by the caller, if necessary. */
 void
-Lst_RemoveS(Lst list, LstNode node)
+Lst_Remove(Lst list, LstNode node)
 {
-    assert(LstIsValid(list));
-    assert(LstNodeIsValid(node));
+    assert(list != NULL);
+    assert(node != NULL);
 
     /*
      * unlink it from the list
@@ -410,9 +296,21 @@ Lst_RemoveS(Lst list, LstNode node)
 
 /* Replace the datum in the given node with the new datum. */
 void
-Lst_ReplaceS(LstNode node, void *datum)
+LstNode_Set(LstNode node, void *datum)
 {
+    assert(node != NULL);
+    assert(datum != NULL);
+
     node->datum = datum;
+}
+
+/* Replace the datum in the given node to NULL. */
+void
+LstNode_SetNull(LstNode node)
+{
+    assert(node != NULL);
+
+    node->datum = NULL;
 }
 
 
@@ -420,57 +318,46 @@ Lst_ReplaceS(LstNode node, void *datum)
  * Node-specific functions
  */
 
-/* Return the first node from the given list, or NULL if the list is empty or
- * invalid. */
+/* Return the first node from the given list, or NULL if the list is empty. */
 LstNode
 Lst_First(Lst list)
 {
-    if (!LstIsValid(list) || LstIsEmpty(list)) {
-	return NULL;
-    } else {
-	return list->first;
-    }
+    assert(list != NULL);
+
+    return list->first;
 }
 
-/* Return the last node from the given list, or NULL if the list is empty or
- * invalid. */
+/* Return the last node from the given list, or NULL if the list is empty. */
 LstNode
 Lst_Last(Lst list)
 {
-    if (!LstIsValid(list) || LstIsEmpty(list)) {
-	return NULL;
-    } else {
-	return list->last;
-    }
+    assert(list != NULL);
+
+    return list->last;
 }
 
 /* Return the successor to the given node on its list, or NULL. */
 LstNode
-Lst_Succ(LstNode node)
+LstNode_Next(LstNode node)
 {
-    if (node == NULL) {
-	return NULL;
-    } else {
-	return node->next;
-    }
+    assert(node != NULL);
+
+    return node->next;
 }
 
 /* Return the predecessor to the given node on its list, or NULL. */
 LstNode
-Lst_Prev(LstNode node)
+LstNode_Prev(LstNode node)
 {
-    if (node == NULL) {
-	return NULL;
-    } else {
-	return node->prev;
-    }
+    assert(node != NULL);
+    return node->prev;
 }
 
 /* Return the datum stored in the given node. */
 void *
-Lst_DatumS(LstNode node)
+Lst_Datum(LstNode node)
 {
-    assert(LstNodeIsValid(node));
+    assert(node != NULL);
     return node->datum;
 }
 
@@ -479,52 +366,51 @@ Lst_DatumS(LstNode node)
  * Functions for entire lists
  */
 
-/* Return TRUE if the given list is empty or invalid. */
+/* Return TRUE if the given list is empty. */
 Boolean
 Lst_IsEmpty(Lst list)
 {
-    return !LstIsValid(list) || LstIsEmpty(list);
+    assert(list != NULL);
+
+    return LstIsEmpty(list);
 }
 
-/* Return the first node from the given list for which the given comparison
- * function returns 0, or NULL if none of the nodes matches. */
+/* Return the first node from the list for which the match function returns
+ * TRUE, or NULL if none of the nodes matched. */
 LstNode
-Lst_Find(Lst list, const void *cmpData, int (*cmp)(const void *, const void *))
+Lst_Find(Lst list, LstFindProc match, const void *matchArgs)
 {
-    return Lst_FindFrom(list, Lst_First(list), cmpData, cmp);
+    return Lst_FindFrom(list, Lst_First(list), match, matchArgs);
 }
 
-/* Return the first node from the given list, starting at the given node, for
- * which the given comparison function returns 0, or NULL if none of the nodes
- * matches. */
+/* Return the first node from the list, starting at the given node, for which
+ * the match function returns TRUE, or NULL if none of the nodes matches.
+ *
+ * The start node may be NULL, in which case nothing is found. This allows
+ * for passing Lst_First or LstNode_Next as the start node. */
 LstNode
-Lst_FindFrom(Lst list, LstNode node, const void *cmpData,
-	     int (*cmp)(const void *, const void *))
+Lst_FindFrom(Lst list, LstNode node, LstFindProc match, const void *matchArgs)
 {
     LstNode tln;
 
-    if (!LstIsValid(list) || LstIsEmpty(list) || !LstNodeIsValid(node)) {
-	return NULL;
-    }
+    assert(list != NULL);
+    assert(match != NULL);
 
-    tln = node;
-
-    do {
-	if ((*cmp)(tln->datum, cmpData) == 0)
+    for (tln = node; tln != NULL; tln = tln->next) {
+	if (match(tln->datum, matchArgs))
 	    return tln;
-	tln = tln->next;
-    } while (tln != node && tln != NULL);
+    }
 
     return NULL;
 }
 
 /* Return the first node that contains the given datum, or NULL. */
 LstNode
-Lst_MemberS(Lst list, void *datum)
+Lst_Member(Lst list, void *datum)
 {
     LstNode node;
 
-    assert(LstIsValid(list));
+    assert(list != NULL);
     assert(datum != NULL);
 
     for (node = list->first; node != NULL; node = node->next) {
@@ -540,8 +426,10 @@ Lst_MemberS(Lst list, void *datum)
  * should return 0 if traversal should continue and non-zero if it should
  * abort. */
 int
-Lst_ForEach(Lst list, int (*proc)(void *, void *), void *procData)
+Lst_ForEach(Lst list, LstActionProc proc, void *procData)
 {
+    if (LstIsEmpty(list))
+	return 0;		/* XXX: Document what this value means. */
     return Lst_ForEachFrom(list, Lst_First(list), proc, procData);
 }
 
@@ -550,16 +438,16 @@ Lst_ForEach(Lst list, int (*proc)(void *, void *), void *procData)
  * and non-zero if it should abort. */
 int
 Lst_ForEachFrom(Lst list, LstNode node,
-		int (*proc)(void *, void *), void *procData)
+		 LstActionProc proc, void *procData)
 {
     LstNode tln = node;
     LstNode next;
     Boolean done;
     int result;
 
-    if (!LstIsValid(list) || LstIsEmpty(list)) {
-	return 0;
-    }
+    assert(list != NULL);
+    assert(node != NULL);
+    assert(proc != NULL);
 
     do {
 	/*
@@ -571,12 +459,11 @@ Lst_ForEachFrom(Lst list, LstNode node,
 
 	/*
 	 * We're done with the traversal if
-	 *  - the next node to examine is the first in the queue or
-	 *    doesn't exist and
+	 *  - the next node to examine doesn't exist and
 	 *  - nothing's been added after the current node (check this
 	 *    after proc() has been called).
 	 */
-	done = (next == NULL || next == list->first);
+	done = next == NULL;
 
 	tln->useCount++;
 	result = (*proc)(tln->datum, procData);
@@ -601,105 +488,42 @@ Lst_ForEachFrom(Lst list, LstNode node,
     return result;
 }
 
-/* Concatenate two lists. New nodes are created to hold the data elements,
- * if specified, but the data themselves are not copied. If the data
- * should be duplicated to avoid confusion with another list, the Lst_Duplicate
- * function should be called first. If LST_CONCLINK is specified, the second
- * list is destroyed since its pointers have been corrupted and the list is no
- * longer usable.
- *
- * Input:
- *	list1		The list to which list2 is to be appended
- *	list2		The list to append to list1
- *	flags		LST_CONCNEW if the list nodes should be duplicated
- *			LST_CONCLINK if the list nodes should just be relinked
- */
-ReturnStatus
-Lst_Concat(Lst list1, Lst list2, int flags)
+/* Move all nodes from list2 to the end of list1.
+ * List2 is destroyed and freed. */
+void
+Lst_MoveAll(Lst list1, Lst list2)
 {
-    LstNode node;	/* original node */
-    LstNode newNode;
-    LstNode last;	/* the last element in the list.
-			 * Keeps bookkeeping until the end */
+    assert(list1 != NULL);
+    assert(list2 != NULL);
 
-    if (!LstIsValid(list1) || !LstIsValid(list2)) {
-	return FAILURE;
-    }
-
-    if (flags == LST_CONCLINK) {
-	if (list2->first != NULL) {
-	    /*
-	     * So long as the second list isn't empty, we just link the
-	     * first element of the second list to the last element of the
-	     * first list. If the first list isn't empty, we then link the
-	     * last element of the list to the first element of the second list
-	     * The last element of the second list, if it exists, then becomes
-	     * the last element of the first list.
-	     */
-	    list2->first->prev = list1->last;
-	    if (list1->last != NULL) {
-		list1->last->next = list2->first;
-	    } else {
-		list1->first = list2->first;
-	    }
-	    list1->last = list2->last;
+    if (list2->first != NULL) {
+	list2->first->prev = list1->last;
+	if (list1->last != NULL) {
+	    list1->last->next = list2->first;
+	} else {
+	    list1->first = list2->first;
 	}
-	free(list2);
-    } else if (list2->first != NULL) {
-	/*
-	 * We set the 'next' of the last element of list 2 to be nil to make
-	 * the loop less difficult. The loop simply goes through the entire
-	 * second list creating new LstNodes and filling in the 'next', and
-	 * 'prev' to fit into list1 and its datum field from the
-	 * datum field of the corresponding element in list2. The 'last' node
-	 * follows the last of the new nodes along until the entire list2 has
-	 * been appended. Only then does the bookkeeping catch up with the
-	 * changes. During the first iteration of the loop, if 'last' is nil,
-	 * the first list must have been empty so the newly-created node is
-	 * made the first node of the list.
-	 */
-	list2->last->next = NULL;
-	for (last = list1->last, node = list2->first;
-	     node != NULL;
-	     node = node->next)
-	{
-	    newNode = LstNodeNew(node->datum);
-	    if (last != NULL) {
-		last->next = newNode;
-	    } else {
-		list1->first = newNode;
-	    }
-	    newNode->prev = last;
-	    last = newNode;
-	}
-
-	/*
-	 * Finish bookkeeping. The last new element becomes the last element
-	 * of list one.
-	 */
-	list1->last = last;
-	last->next = NULL;
+	list1->last = list2->last;
     }
-
-    return SUCCESS;
+    free(list2);
 }
 
 /* Copy the element data from src to the start of dst. */
 void
-Lst_PrependAllS(Lst dst, Lst src)
+Lst_PrependAll(Lst dst, Lst src)
 {
     LstNode node;
     for (node = src->last; node != NULL; node = node->prev)
-        Lst_PrependS(dst, node->datum);
+	Lst_Prepend(dst, node->datum);
 }
 
 /* Copy the element data from src to the end of dst. */
 void
-Lst_AppendAllS(Lst dst, Lst src)
+Lst_AppendAll(Lst dst, Lst src)
 {
     LstNode node;
     for (node = src->first; node != NULL; node = node->next)
-        Lst_AppendS(dst, node->datum);
+	Lst_Append(dst, node->datum);
 }
 
 /*
@@ -714,22 +538,10 @@ Lst_AppendAllS(Lst dst, Lst src)
 
 /* Open a list for sequential access. A list can still be searched, etc.,
  * without confusing these functions. */
-ReturnStatus
+void
 Lst_Open(Lst list)
 {
-    if (!LstIsValid(list)) {
-	return FAILURE;
-    }
-    Lst_OpenS(list);
-    return SUCCESS;
-}
-
-/* Open a list for sequential access. A list can still be searched, etc.,
- * without confusing these functions. */
-void
-Lst_OpenS(Lst list)
-{
-    assert(LstIsValid(list));
+    assert(list != NULL);
 
     /* XXX: This assertion fails for NetBSD's "build.sh -j1 tools", somewhere
      * between "dependall ===> compat" and "dependall ===> binstall".
@@ -745,11 +557,11 @@ Lst_OpenS(Lst list)
 /* Return the next node for the given list, or NULL if the end has been
  * reached. */
 LstNode
-Lst_NextS(Lst list)
+Lst_Next(Lst list)
 {
     LstNode node;
 
-    assert(LstIsValid(list));
+    assert(list != NULL);
     assert(list->isOpen);
 
     list->prev = list->curr;
@@ -789,9 +601,9 @@ Lst_NextS(Lst list)
 
 /* Close a list which was opened for sequential access. */
 void
-Lst_CloseS(Lst list)
+Lst_Close(Lst list)
 {
-    assert(LstIsValid(list));
+    assert(list != NULL);
     assert(list->isOpen);
 
     list->isOpen = FALSE;
@@ -805,22 +617,22 @@ Lst_CloseS(Lst list)
 
 /* Add the datum to the tail of the given list. */
 void
-Lst_EnqueueS(Lst list, void *datum)
+Lst_Enqueue(Lst list, void *datum)
 {
-    Lst_AppendS(list, datum);
+    Lst_Append(list, datum);
 }
 
 /* Remove and return the datum at the head of the given list. */
 void *
-Lst_DequeueS(Lst list)
+Lst_Dequeue(Lst list)
 {
     void *datum;
 
-    assert(LstIsValid(list));
+    assert(list != NULL);
     assert(!LstIsEmpty(list));
 
     datum = list->first->datum;
-    Lst_RemoveS(list, list->first);
+    Lst_Remove(list, list->first);
     assert(datum != NULL);
     return datum;
 }

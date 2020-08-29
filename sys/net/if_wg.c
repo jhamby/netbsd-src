@@ -1,4 +1,4 @@
-/*	$NetBSD: if_wg.c,v 1.22 2020/08/21 20:21:36 riastradh Exp $	*/
+/*	$NetBSD: if_wg.c,v 1.32 2020/08/28 07:03:08 riastradh Exp $	*/
 
 /*
  * Copyright (C) Ryota Ozaki <ozaki.ryota@gmail.com>
@@ -30,85 +30,84 @@
  */
 
 /*
- * This is an implementation of WireGuard, a fast, modern, secure VPN protocol,
- * for the NetBSD kernel and rump kernels.
- *
- * The implementation is based on the paper of WireGuard as of 2018-06-30 [1].
- * The paper is referred in the source code with label [W].  Also the
- * specification of the Noise protocol framework as of 2018-07-11 [2] is
- * referred with label [N].
+ * This network interface aims to implement the WireGuard protocol.
+ * The implementation is based on the paper of WireGuard as of
+ * 2018-06-30 [1].  The paper is referred in the source code with label
+ * [W].  Also the specification of the Noise protocol framework as of
+ * 2018-07-11 [2] is referred with label [N].
  *
  * [1] https://www.wireguard.com/papers/wireguard.pdf
  * [2] http://noiseprotocol.org/noise.pdf
  */
 
 #include <sys/cdefs.h>
-__KERNEL_RCSID(0, "$NetBSD: if_wg.c,v 1.22 2020/08/21 20:21:36 riastradh Exp $");
+__KERNEL_RCSID(0, "$NetBSD: if_wg.c,v 1.32 2020/08/28 07:03:08 riastradh Exp $");
 
 #ifdef _KERNEL_OPT
 #include "opt_inet.h"
 #endif
 
 #include <sys/param.h>
-#include <sys/systm.h>
-#include <sys/kernel.h>
-#include <sys/mbuf.h>
-#include <sys/socket.h>
-#include <sys/sockio.h>
-#include <sys/errno.h>
-#include <sys/ioctl.h>
-#include <sys/time.h>
-#include <sys/timespec.h>
-#include <sys/socketvar.h>
-#include <sys/syslog.h>
+#include <sys/types.h>
+
+#include <sys/atomic.h>
+#include <sys/callout.h>
+#include <sys/cprng.h>
 #include <sys/cpu.h>
-#include <sys/intr.h>
-#include <sys/kmem.h>
 #include <sys/device.h>
+#include <sys/domain.h>
+#include <sys/errno.h>
+#include <sys/intr.h>
+#include <sys/ioctl.h>
+#include <sys/kernel.h>
+#include <sys/kmem.h>
+#include <sys/kthread.h>
+#include <sys/mbuf.h>
 #include <sys/module.h>
 #include <sys/mutex.h>
-#include <sys/rwlock.h>
+#include <sys/pcq.h>
+#include <sys/percpu.h>
 #include <sys/pserialize.h>
 #include <sys/psref.h>
-#include <sys/kthread.h>
-#include <sys/cprng.h>
-#include <sys/atomic.h>
-#include <sys/sysctl.h>
-#include <sys/domain.h>
-#include <sys/pcq.h>
 #include <sys/queue.h>
-#include <sys/percpu.h>
-#include <sys/callout.h>
+#include <sys/rwlock.h>
+#include <sys/socket.h>
+#include <sys/socketvar.h>
+#include <sys/sockio.h>
+#include <sys/sysctl.h>
+#include <sys/syslog.h>
+#include <sys/systm.h>
+#include <sys/time.h>
+#include <sys/timespec.h>
 
 #include <net/bpf.h>
 #include <net/if.h>
 #include <net/if_types.h>
+#include <net/if_wg.h>
 #include <net/route.h>
 
 #include <netinet/in.h>
+#include <netinet/in_pcb.h>
+#include <netinet/in_var.h>
 #include <netinet/ip.h>
 #include <netinet/ip_var.h>
 #include <netinet/udp.h>
 #include <netinet/udp_var.h>
-#include <netinet/in_var.h>
-#include <netinet/in_pcb.h>
 
 #ifdef INET6
-#include <netinet6/in6_var.h>
 #include <netinet/ip6.h>
-#include <netinet6/ip6_var.h>
 #include <netinet6/in6_pcb.h>
+#include <netinet6/in6_var.h>
+#include <netinet6/ip6_var.h>
 #include <netinet6/udp6_var.h>
 #endif /* INET6 */
-
-#include <net/if_wg.h>
 
 #include <prop/proplib.h>
 
 #include <crypto/blake2/blake2s.h>
-#include <crypto/sodium/crypto_scalarmult.h>
 #include <crypto/sodium/crypto_aead_chacha20poly1305.h>
 #include <crypto/sodium/crypto_aead_xchacha20poly1305.h>
+#include <crypto/sodium/crypto_scalarmult.h>
 
 #include "ioconf.h"
 
@@ -120,7 +119,7 @@ __KERNEL_RCSID(0, "$NetBSD: if_wg.c,v 1.22 2020/08/21 20:21:36 riastradh Exp $")
  * Data structures
  * - struct wg_softc is an instance of wg interfaces
  *   - It has a list of peers (struct wg_peer)
- *   - It has a kthread that sends/receives WireGuard handshake messages and
+ *   - It has a kthread that sends/receives handshake messages and
  *     runs event handlers
  *   - It has its own two routing tables: one is for IPv4 and the other IPv6
  * - struct wg_peer is a representative of a peer
@@ -1572,7 +1571,6 @@ wg_send_handshake_msg_init(struct wg_softc *wg, struct wg_peer *wgp)
 	m = m_gethdr(M_WAIT, MT_DATA);
 	m->m_pkthdr.len = m->m_len = sizeof(*wgmi);
 	wgmi = mtod(m, struct wg_msg_init *);
-
 	wg_fill_msg_init(wg, wgp, wgs, wgmi);
 
 	error = wg->wg_ops->send_hs_msg(wgp, m);
@@ -2345,11 +2343,7 @@ wg_handle_msg_data(struct wg_softc *wg, struct mbuf *m,
 	bool success, free_encrypted_buf = false, ok;
 	struct mbuf *n;
 
-	if (m->m_len < sizeof(struct wg_msg_data)) {
-		m = m_pullup(m, sizeof(struct wg_msg_data));
-		if (m == NULL)
-			return;
-	}
+	KASSERT(m->m_len >= sizeof(struct wg_msg_data));
 	wgmd = mtod(m, struct wg_msg_data *);
 
 	KASSERT(wgmd->wgmd_type == WG_MSG_TYPE_DATA);
@@ -2393,6 +2387,7 @@ wg_handle_msg_data(struct wg_softc *wg, struct mbuf *m,
 		free_encrypted_buf = true;
 	}
 	/* m_ensure_contig may change m regardless of its result */
+	KASSERT(m->m_len >= sizeof(*wgmd));
 	wgmd = mtod(m, struct wg_msg_data *);
 
 	decrypted_len = encrypted_len - WG_AUTHTAG_LEN;
@@ -2575,42 +2570,63 @@ out:
 	wg_put_session(wgs, &psref);
 }
 
-static bool
-wg_validate_msg_length(struct wg_softc *wg, const struct mbuf *m)
+static struct mbuf *
+wg_validate_msg_header(struct wg_softc *wg, struct mbuf *m)
 {
-	struct wg_msg *wgm;
-	size_t mlen;
+	struct wg_msg wgm;
+	size_t mbuflen;
+	size_t msglen;
 
-	mlen = m_length(m);
-	if (__predict_false(mlen < sizeof(struct wg_msg)))
-		return false;
+	/*
+	 * Get the mbuf chain length.  It is already guaranteed, by
+	 * wg_overudp_cb, to be large enough for a struct wg_msg.
+	 */
+	mbuflen = m_length(m);
+	KASSERT(mbuflen >= sizeof(struct wg_msg));
 
-	wgm = mtod(m, struct wg_msg *);
-	switch (wgm->wgm_type) {
+	/*
+	 * Copy the message header (32-bit message type) out -- we'll
+	 * worry about contiguity and alignment later.
+	 */
+	m_copydata(m, 0, sizeof(wgm), &wgm);
+	switch (wgm.wgm_type) {
 	case WG_MSG_TYPE_INIT:
-		if (__predict_true(mlen >= sizeof(struct wg_msg_init)))
-			return true;
+		msglen = sizeof(struct wg_msg_init);
 		break;
 	case WG_MSG_TYPE_RESP:
-		if (__predict_true(mlen >= sizeof(struct wg_msg_resp)))
-			return true;
+		msglen = sizeof(struct wg_msg_resp);
 		break;
 	case WG_MSG_TYPE_COOKIE:
-		if (__predict_true(mlen >= sizeof(struct wg_msg_cookie)))
-			return true;
+		msglen = sizeof(struct wg_msg_cookie);
 		break;
 	case WG_MSG_TYPE_DATA:
-		if (__predict_true(mlen >= sizeof(struct wg_msg_data)))
-			return true;
+		msglen = sizeof(struct wg_msg_data);
 		break;
 	default:
 		WG_LOG_RATECHECK(&wg->wg_ppsratecheck, LOG_DEBUG,
-		    "Unexpected msg type: %u\n", wgm->wgm_type);
-		return false;
+		    "Unexpected msg type: %u\n", wgm.wgm_type);
+		goto error;
 	}
-	WG_DLOG("Invalid msg size: mlen=%lu type=%u\n", mlen, wgm->wgm_type);
 
-	return false;
+	/* Verify the mbuf chain is long enough for this type of message.  */
+	if (__predict_false(mbuflen < msglen)) {
+		WG_DLOG("Invalid msg size: mbuflen=%lu type=%u\n", mbuflen,
+		    wgm.wgm_type);
+		goto error;
+	}
+
+	/* Make the message header contiguous if necessary.  */
+	if (__predict_false(m->m_len < msglen)) {
+		m = m_pullup(m, msglen);
+		if (m == NULL)
+			return NULL;
+	}
+
+	return m;
+
+error:
+	m_freem(m);
+	return NULL;
 }
 
 static void
@@ -2618,14 +2634,12 @@ wg_handle_packet(struct wg_softc *wg, struct mbuf *m,
     const struct sockaddr *src)
 {
 	struct wg_msg *wgm;
-	bool valid;
 
-	valid = wg_validate_msg_length(wg, m);
-	if (!valid) {
-		m_freem(m);
+	m = wg_validate_msg_header(wg, m);
+	if (__predict_false(m == NULL))
 		return;
-	}
 
+	KASSERT(m->m_len >= sizeof(struct wg_msg));
 	wgm = mtod(m, struct wg_msg *);
 	switch (wgm->wgm_type) {
 	case WG_MSG_TYPE_INIT:
@@ -2641,7 +2655,7 @@ wg_handle_packet(struct wg_softc *wg, struct mbuf *m,
 		wg_handle_msg_data(wg, m, src);
 		break;
 	default:
-		/* wg_validate_msg_length should already reject this case */
+		/* wg_validate_msg_header should already reject this case */
 		break;
 	}
 }
@@ -2670,6 +2684,7 @@ wg_receive_packets(struct wg_softc *wg, const int af)
 		}
 
 		KASSERT(paddr != NULL);
+		KASSERT(paddr->m_len >= sizeof(struct sockaddr));
 		src = mtod(paddr, struct sockaddr *);
 
 		wg_handle_packet(wg, m, src);
@@ -2917,20 +2932,48 @@ wg_overudp_cb(struct mbuf **mp, int offset, struct socket *so,
 
 	WG_TRACE("enter");
 
+	/* Verify the mbuf chain is long enough to have a wg msg header.  */
+	KASSERT(offset <= m_length(m));
+	if (__predict_false(m_length(m) - offset < sizeof(struct wg_msg))) {
+		/* drop on the floor */
+		m_freem(m);
+		return -1;
+	}
+
+	/*
+	 * Copy the message header (32-bit message type) out -- we'll
+	 * worry about contiguity and alignment later.
+	 */
 	m_copydata(m, offset, sizeof(struct wg_msg), &wgm);
 	WG_DLOG("type=%d\n", wgm.wgm_type);
 
+	/*
+	 * Handle DATA packets promptly as they arrive.  Other packets
+	 * may require expensive public-key crypto and are not as
+	 * sensitive to latency, so defer them to the worker thread.
+	 */
 	switch (wgm.wgm_type) {
 	case WG_MSG_TYPE_DATA:
+		/* handle immediately */
 		m_adj(m, offset);
+		if (__predict_false(m->m_len < sizeof(struct wg_msg_data))) {
+			m = m_pullup(m, sizeof(struct wg_msg_data));
+			if (m == NULL)
+				return -1;
+		}
 		wg_handle_msg_data(wg, m, src);
 		*mp = NULL;
 		return 1;
+	case WG_MSG_TYPE_INIT:
+	case WG_MSG_TYPE_RESP:
+	case WG_MSG_TYPE_COOKIE:
+		/* pass through to so_receive in wg_receive_packets */
+		return 0;
 	default:
-		break;
+		/* drop on the floor */
+		m_freem(m);
+		return -1;
 	}
-
-	return 0;
 }
 
 static int
@@ -3339,14 +3382,14 @@ wg_if_attach(struct wg_softc *wg)
 
 	wg->wg_if.if_addrlen = 0;
 	wg->wg_if.if_mtu = WG_MTU;
-	wg->wg_if.if_flags = IFF_POINTOPOINT;
+	wg->wg_if.if_flags = IFF_POINTOPOINT | IFF_MULTICAST;
 	wg->wg_if.if_extflags = IFEF_NO_LINK_STATE_CHANGE;
 	wg->wg_if.if_extflags |= IFEF_MPSAFE;
 	wg->wg_if.if_ioctl = wg_ioctl;
 	wg->wg_if.if_output = wg_output;
 	wg->wg_if.if_init = wg_init;
 	wg->wg_if.if_stop = wg_stop;
-	wg->wg_if.if_type = IFT_WIREGUARD;
+	wg->wg_if.if_type = IFT_OTHER;
 	wg->wg_if.if_dlt = DLT_NULL;
 	wg->wg_if.if_softc = wg;
 	IFQ_SET_READY(&wg->wg_if.if_snd);
@@ -3595,6 +3638,9 @@ wg_get_mbuf(size_t leading_len, size_t len)
 {
 	struct mbuf *m;
 
+	KASSERT(leading_len <= MCLBYTES);
+	KASSERT(len <= MCLBYTES - leading_len);
+
 	m = m_gethdr(M_DONTWAIT, MT_DATA);
 	if (m == NULL)
 		return NULL;
@@ -3654,6 +3700,7 @@ wg_send_data_msg(struct wg_peer *wgp, struct wg_session *wgs,
 		error = ENOBUFS;
 		goto end;
 	}
+	KASSERT(n->m_len >= sizeof(*wgmd));
 	wgmd = mtod(n, struct wg_msg_data *);
 	wg_fill_msg_data(wg, wgp, wgs, wgmd);
 	/* [W] 5.4.6: AEAD(Tm^send, Nm^send, P, e) */
@@ -4083,7 +4130,7 @@ wg_ioctl_get(struct wg_softc *wg, struct ifdrv *ifd)
 {
 	int error = ENOMEM;
 	prop_dictionary_t prop_dict;
-	prop_array_t peers;
+	prop_array_t peers = NULL;
 	char *buf;
 	struct wg_peer *wgp;
 	int s, i;
@@ -4399,14 +4446,14 @@ wg_stop(struct ifnet *ifp, int disable)
 }
 
 #ifdef WG_DEBUG_PARAMS
-SYSCTL_SETUP(sysctl_net_wireguard_setup, "sysctl net.wireguard setup")
+SYSCTL_SETUP(sysctl_net_wg_setup, "sysctl net.wg setup")
 {
 	const struct sysctlnode *node = NULL;
 
 	sysctl_createv(clog, 0, NULL, &node,
 	    CTLFLAG_PERMANENT,
-	    CTLTYPE_NODE, "wireguard",
-	    SYSCTL_DESCR("WireGuard"),
+	    CTLTYPE_NODE, "wg",
+	    SYSCTL_DESCR("wg(4)"),
 	    NULL, 0, NULL, 0,
 	    CTL_NET, CTL_CREATE, CTL_EOL);
 	sysctl_createv(clog, 0, &node, NULL,
@@ -4524,11 +4571,15 @@ wg_input_user(struct ifnet *ifp, struct mbuf *m, const int af)
 	if (af == AF_INET) {
 		struct sockaddr_in *sin = (struct sockaddr_in *)&ss;
 		struct ip *ip;
+
+		KASSERT(m->m_len >= sizeof(struct ip));
 		ip = mtod(m, struct ip *);
 		sockaddr_in_init(sin, &ip->ip_dst, 0);
 	} else {
 		struct sockaddr_in6 *sin6 = (struct sockaddr_in6 *)&ss;
 		struct ip6_hdr *ip6;
+
+		KASSERT(m->m_len >= sizeof(struct ip6_hdr));
 		ip6 = mtod(m, struct ip6_hdr *);
 		sockaddr_in6_init(sin6, &ip6->ip6_dst, 0, 0, 0);
 	}
